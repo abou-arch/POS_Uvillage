@@ -10,6 +10,15 @@ input, select { font:inherit; padding:6px 8px; border:1px solid var(--line); bor
 .login { max-width:320px; margin:12vh auto; background:#fff; padding:24px; border-radius:8px; display:grid; gap:12px; }
 .login label { display:grid; gap:4px; }
 .login button { padding:10px; background:var(--blue); color:#fff; border:0; border-radius:4px; }
+.notice { margin:0; padding:8px 10px; background:#fef3c7; border-radius:4px; }
+
+.picker { max-width:380px; margin:12vh auto; background:#fff; padding:24px; border-radius:8px; display:grid; gap:12px; }
+.picker h1 { margin:0; font-size:22px; } .picker p { margin:0; } .picker > .link { justify-self:start; padding:0; }
+.picker footer { display:flex; justify-content:space-between; align-items:center; padding-top:12px; border-top:1px solid var(--line); }
+.choices { display:grid; gap:8px; }
+.choices button { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:14px 16px; font-size:17px; background:#fff; border:1px solid var(--line); border-radius:6px; }
+.choices button:hover:not(:disabled), .choices button:focus-visible { border-color:var(--blue); outline:2px solid var(--blue); }
+.choices button:disabled { opacity:.5; cursor:not-allowed; }
 
 .pos { height:100vh; display:flex; flex-direction:column; }
 .pos header { display:flex; gap:16px; align-items:center; padding:10px 16px; background:var(--blue); color:#fff; }

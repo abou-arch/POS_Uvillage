@@ -4,7 +4,7 @@
 
 export const users = [
   { id: 'u_1', username: 'admin', password: 'admin', name: 'Falcon', role: 'admin', store_ids: ['st_1', 'st_2'] },
-  { id: 'u_2', username: 'caissier', password: 'caissier', name: 'Caissier 1', role: 'cashier', store_ids: ['st_1'] },
+  { id: 'u_2', username: 'caissier', password: 'caissier', name: 'Caissier 1', role: 'cashier', store_ids: ['st_2'] },
 ];
 
 export const stores = [

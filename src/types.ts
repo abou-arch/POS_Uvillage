@@ -6,10 +6,10 @@ export interface User { id: string; name: string; role: Role }
 export interface Register { id: string; name: string }
 export interface Store { id: string; name: string; registers: Register[] }
 
-export interface Session {
-  token: string;
-  user: User;
-  stores: Store[];
+// Réponse de POST /auth/login : connecté, magasin et caisse pas encore choisis.
+export interface Auth { token: string; user: User; stores: Store[] }
+
+export interface Session extends Auth {
   storeId: string;
   registerId: string;
 }
