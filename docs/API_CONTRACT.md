@@ -1,6 +1,6 @@
 # Contrat d'API — Caisse (POS) ↔ Application web
 
-Version 0.1 — proposition à valider par l'équipe.
+Version 0.2 — proposition à valider par l'équipe. (0.2 : les clients sont identifiés par leur matricule universitaire au lieu de l'ICE.)
 
 La caisse (POS) est développée séparément de l'application web (back-office). Ce document fixe ce que la caisse attend de l'API, pour que les deux parties avancent en parallèle. La caisse fonctionne d'abord sur une fausse API (`mock-api/`) qui respecte exactement ce contrat.
 
@@ -89,10 +89,14 @@ Rôles attendus côté caisse : `admin`, `manager`, `cashier`. Un caissier ne vo
 
 ## 4. Clients
 
+Les clients de l'université sont identifiés par leur **matricule** : chiffres seulement (zéros du début compris), 10 chiffres au plus en général, 15 au maximum. `matricule` et `phone` sont facultatifs (`null`). Le téléphone est envoyé au format international (`+212…`).
+
 ### `GET /api/customers?search=ahmed`
 
+`search` porte sur le nom, le téléphone et le matricule.
+
 ```json
-[ { "id": "c_8", "name": "Ahmed", "phone": "+212600000000", "ice": null } ]
+[ { "id": "c_8", "name": "Ahmed", "phone": "+212600000000", "matricule": "2023001542" } ]
 ```
 
 Le « client de passage » n'est pas un client en base : la vente a simplement `customer_id: null`.
@@ -100,8 +104,8 @@ Le « client de passage » n'est pas un client en base : la vente a simplement `
 ### `POST /api/customers`
 
 ```json
-// Requête
-{ "id": "c_local_7f3c…", "name": "Nouveau client", "phone": "+212600000001" }
+// Requête : id UUID v4 généré par la caisse
+{ "id": "7f3c2a9e-1b4d-4c8e-9f21-3a5b6c7d8e9f", "name": "Nouveau client", "phone": "+212600000001", "matricule": "2024000187" }
 // Réponse 201 : le client créé (l'id envoyé par la caisse est conservé)
 ```
 
@@ -195,3 +199,4 @@ Les totaux de la vente sont la somme des lignes, puis `+ other_charges − globa
 3. Format de `number` (numérotation continue par caisse ?).
 4. SMS : qui l'envoie (API à la réception de la vente si `send_sms: true`) ?
 5. Remise : plafond autorisé pour un caissier ?
+6. Matricule : unique par client ? Si oui, l'API refuse un doublon (`409`).

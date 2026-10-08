@@ -1,7 +1,8 @@
 import { useRef, useState, type Dispatch, type FormEvent } from 'react';
 import { formatMad, lineTotals, saleTotals } from '../lib/totals.js';
-import type { CartAction, CartState } from '../state/cart';
+import { canSendSms, type CartAction, type CartState } from '../state/cart';
 import type { Product } from '../types';
+import { CustomerPicker } from './CustomerPicker';
 import { Icon } from './ui';
 
 interface Props {
@@ -18,6 +19,8 @@ export function Cart({ cart, dispatch, products }: Props) {
   const totals = saleTotals(cart.lines, cart.otherCharges, cart.globalDiscount);
   const quantity = cart.lines.reduce((n, l) => n + l.quantity, 0);
   const setQuantity = (productId: string, q: number) => dispatch({ type: 'setQuantity', productId, quantity: q });
+  // Après le choix du client ou la fermeture d'une fenêtre, la douchette doit retrouver son champ.
+  const focusScan = () => setTimeout(() => scanRef.current?.focus(), 0);
 
   // Une douchette tape le code puis « Entrée » : on traite donc la saisie comme un formulaire.
   function scan(e: FormEvent) {
@@ -44,8 +47,8 @@ export function Cart({ cart, dispatch, products }: Props) {
           </div>
           {notFound && <p className="scan-error" role="alert">Aucun article pour « {notFound} »</p>}
         </form>
-        {/* Sprint vendredi : recherche / ajout rapide de client */}
-        <div className="customer"><Icon name="user" size={18} />{cart.customer ? cart.customer.name : 'Client de passage'}</div>
+        <CustomerPicker customer={cart.customer} onDone={focusScan}
+          onChange={(customer) => dispatch({ type: 'setCustomer', customer })} />
       </div>
 
       {cart.lines.length === 0 ? (
@@ -120,7 +123,9 @@ export function Cart({ cart, dispatch, products }: Props) {
             </span>
           </label>
           <label className="check">
-            <input type="checkbox" checked={cart.sendSms} onChange={() => dispatch({ type: 'toggleSms' })} /> Envoyer un SMS au client
+            <input type="checkbox" checked={cart.sendSms} disabled={!canSendSms(cart)} onChange={() => dispatch({ type: 'toggleSms' })} />
+            Envoyer un SMS au client
+            {!canSendSms(cart) && <small>({cart.customer ? 'client sans téléphone' : 'client de passage'})</small>}
           </label>
         </div>
         <div className="total">

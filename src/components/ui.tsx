@@ -11,6 +11,7 @@ const paths = {
   cart: <><circle cx="9" cy="20" r="1.5" /><circle cx="18" cy="20" r="1.5" /><path d="M2 3h3l2.6 12.2a1 1 0 0 0 1 .8h9.8a1 1 0 0 0 1-.8L21 7H6" /></>,
   trash: <><path d="M4 7h16M10 11v6M14 11v6M9 7V4h6v3" /><path d="M6 7l1 13h10l1-13" /></>,
   minus: <path d="M5 12h14" />,
+  x: <path d="M6 6l12 12M18 6L6 18" />,
   plus: <path d="M12 5v14M5 12h14" />,
   chevronRight: <path d="M9 6l6 6-6 6" />,
   chevronLeft: <path d="M15 6l-6 6 6 6" />,

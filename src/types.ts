@@ -35,7 +35,8 @@ export interface Product {
   updated_at: string;
 }
 
-export interface Customer { id: string; name: string; phone: string | null; ice: string | null }
+// matricule : identifiant universitaire du client (chiffres seulement).
+export interface Customer { id: string; name: string; phone: string | null; matricule: string | null }
 
 export interface CartLine {
   product_id: string;

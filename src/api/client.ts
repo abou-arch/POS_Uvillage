@@ -48,7 +48,7 @@ export const api = {
   products: (storeId: string, updatedSince?: string) =>
     request<Product[]>(`/products?store_id=${storeId}${updatedSince ? `&updated_since=${encodeURIComponent(updatedSince)}` : ''}`),
   customers: (search = '') => request<Customer[]>(`/customers?search=${encodeURIComponent(search)}`),
-  createCustomer: (c: Omit<Customer, 'ice'> & { ice?: string | null }) =>
+  createCustomer: (c: Omit<Customer, 'matricule'> & { matricule?: string | null }) =>
     request<Customer>('/customers', { method: 'POST', body: JSON.stringify(c) }),
   createSale: (sale: Sale) =>
     request<{ id: string; status: string; stock_warning: boolean }>('/sales', { method: 'POST', body: JSON.stringify(sale) }),

@@ -50,15 +50,15 @@ app.get('/api/products', (req, res) => {
 
 app.get('/api/customers', (req, res) => {
   const q = String(req.query.search ?? '').toLowerCase();
-  res.json(customers.filter((c) => !q || c.name.toLowerCase().includes(q) || c.phone?.includes(q)));
+  res.json(customers.filter((c) => !q || c.name.toLowerCase().includes(q) || c.phone?.includes(q) || c.matricule?.includes(q)));
 });
 
 app.post('/api/customers', (req, res) => {
-  const { id, name, phone = null, ice = null } = req.body ?? {};
+  const { id, name, phone = null, matricule = null } = req.body ?? {};
   if (!name) return err(res, 400, 'NAME_REQUIRED', 'Le nom est obligatoire');
   const existing = customers.find((c) => c.id === id);
   if (existing) return res.status(200).json(existing);
-  const customer = { id: id ?? `c_${crypto.randomUUID()}`, name, phone, ice };
+  const customer = { id: id ?? `c_${crypto.randomUUID()}`, name, phone, matricule };
   customers.push(customer);
   res.status(201).json(customer);
 });

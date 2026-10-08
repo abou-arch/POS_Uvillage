@@ -61,8 +61,8 @@ export const products = [
 ];
 
 export const customers = [
-  { id: 'c_1', name: 'Ahmed', phone: '+212600000001', ice: null },
-  { id: 'c_2', name: 'Épicerie Fatima', phone: '+212600000002', ice: '001234567000089' },
+  { id: 'c_1', name: 'Ahmed', phone: '+212600000001', matricule: '2023001542' },
+  { id: 'c_2', name: 'Épicerie Fatima', phone: '+212600000002', matricule: null },
 ];
 
 export const sales = new Map();

@@ -27,6 +27,9 @@ export type CartAction =
 
 const clamp = (n: number, min: number, max: number) => Math.min(Math.max(Number.isFinite(n) ? n : min, min), max);
 
+/** Un SMS n'est possible que si le client a un téléphone (le client de passage n'en a pas). */
+export const canSendSms = (state: CartState) => !!state.customer?.phone;
+
 export function cartReducer(state: CartState, action: CartAction): CartState {
   switch (action.type) {
     case 'add': {
@@ -57,14 +60,16 @@ export function cartReducer(state: CartState, action: CartAction): CartState {
       };
     case 'remove':
       return { ...state, lines: state.lines.filter((l) => l.product_id !== action.productId) };
-    case 'setCustomer':
-      return { ...state, customer: action.customer };
+    case 'setCustomer': {
+      const next = { ...state, customer: action.customer };
+      return { ...next, sendSms: next.sendSms && canSendSms(next) };
+    }
     case 'setOtherCharges':
       return { ...state, otherCharges: clamp(Math.round(action.amount), 0, 10_000_000) };
     case 'setGlobalDiscount':
       return { ...state, globalDiscount: clamp(Math.round(action.amount), 0, 10_000_000) };
     case 'toggleSms':
-      return { ...state, sendSms: !state.sendSms };
+      return canSendSms(state) ? { ...state, sendSms: !state.sendSms } : state;
     case 'clear':
       return emptyCart;
     case 'restore':
