@@ -1,10 +1,13 @@
 import { useEffect, useReducer, useState } from 'react';
 import { api, ApiError } from '../api/client';
+import { AUTO_PRINT, storeInfo, TIME_ZONE } from '../config/store';
 import { buildSale, decrementStock } from '../lib/buildSale';
+import { buildReceipt } from '../lib/receipt';
 import { formatMad } from '../lib/totals.js';
 import { uuidv4 } from '../lib/uuid';
 import { cartReducer, emptyCart, type CartAction } from '../state/cart';
 import { holdCart, refreshFromCatalog } from '../state/held';
+import { loadLastReceipt, saveLastReceipt } from '../state/lastReceipt';
 import { useHeldSales } from '../state/useHeldSales';
 import { lastCounter, saveCounter, sendSale, type LastSale } from '../state/sales';
 import { usePendingSales } from '../state/usePendingSales';
@@ -12,6 +15,7 @@ import type { Brand, Category, Payment, Product, Sale, Session } from '../types'
 import { Cart } from './Cart';
 import { HeldListModal } from './HeldListModal';
 import { ProductGrid } from './ProductGrid';
+import { Ticket } from './Ticket';
 import { Avatar, Icon } from './ui';
 
 export function PosScreen({ session, onLogout }: { session: Session; onLogout: () => void }) {
@@ -26,9 +30,22 @@ export function PosScreen({ session, onLogout }: { session: Session; onLogout: (
   const [resumeNotice, setResumeNotice] = useState<string | null>(null);
   const pending = usePendingSales();
   const held = useHeldSales(session.registerId);
+  const [receipt, setReceipt] = useState(() => loadLastReceipt(session.registerId));
+  const [duplicate, setDuplicate] = useState(false);
+  const [printRequest, setPrintRequest] = useState(0);
 
   const store = session.stores.find((s) => s.id === session.storeId);
   const register = store?.registers.find((r) => r.id === session.registerId);
+
+  // L'impression part après le rendu, pour que le ticket imprimé soit bien celui de la vente demandée.
+  useEffect(() => {
+    if (printRequest > 0) window.print();
+  }, [printRequest]);
+
+  function reprint() {
+    setDuplicate(true);
+    setPrintRequest((n) => n + 1);
+  }
 
   // Encaissement : la vente est d'abord gardée sur la caisse, puis envoyée. Elle ne peut donc plus se perdre.
   async function checkout(payments: Payment[], amountReceived: number) {
@@ -45,6 +62,11 @@ export function PosScreen({ session, onLogout }: { session: Session; onLogout: (
     }
     saveCounter(session.registerId, counter);
     pending.add(sale);
+    const ticket = { sale, cashier: session.user.name, customer: cart.customer?.name ?? null };
+    saveLastReceipt(session.registerId, ticket);
+    setReceipt(ticket);
+    setDuplicate(false);
+    if (AUTO_PRINT) setPrintRequest((n) => n + 1);
     dispatch({ type: 'clear' });
     setError(null);
     setResumeNotice(null);
@@ -137,6 +159,10 @@ export function PosScreen({ session, onLogout }: { session: Session; onLogout: (
         <button className="held-button" onClick={() => setShowHeld(true)}>
           <Icon name="pause" size={18} />Liste d’attente<span className="count">{held.list.length}</span>
         </button>
+        <button className="held-button" disabled={!receipt} onClick={reprint}
+          aria-label="Réimprimer le dernier ticket" title={receipt ? `Réimprimer le ticket ${receipt.sale.number}` : 'Aucun ticket à réimprimer'}>
+          <Icon name="printer" size={18} /><span className="label">Réimprimer le dernier ticket</span>
+        </button>
         <span className="who"><Avatar name={session.user.name} />{session.user.name}</span>
         <button className="btn ghost" onClick={onLogout}><Icon name="logout" size={18} />Déconnexion</button>
       </header>
@@ -184,6 +210,9 @@ export function PosScreen({ session, onLogout }: { session: Session; onLogout: (
       {showHeld && (
         <HeldListModal list={held.list} cartEmpty={cart.lines.length === 0} onResume={resume} onDelete={held.remove}
           onClose={() => { setShowHeld(false); document.getElementById('scan')?.focus(); }} />
+      )}
+      {receipt && (
+        <Ticket receipt={buildReceipt(receipt, storeInfo(session.storeId, store?.name ?? ''), TIME_ZONE)} copy={duplicate} />
       )}
     </div>
   );

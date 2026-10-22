@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { allocate, lineTotals, saleTotals, vatBreakdown } from './totals.js';
+import { allocate, lineTotals, saleTotals, vatBreakdown, vatBreakdownOfLines } from './totals.js';
 
 const line = (quantity, unit_price_ttc, tva_rate, discount = 0) => ({ quantity, unit_price_ttc, discount, tva_rate });
 
@@ -48,6 +48,11 @@ describe('TVA des autres charges et de la remise globale (au prorata des taux)',
       expect(t.ttc).toBe(linesTtc + charges - discount);
       expect(t.ht + t.tva).toBe(t.ttc);
     }
+  });
+  it('donne le même récapitulatif à partir des total_ttc enregistrés des lignes (ticket)', () => {
+    const lines = [line(3, 333, 20), line(1, 999, 14, 99), line(0.375, 2150, 7), line(5, 150, 0)];
+    const stored = lines.map((l) => ({ tva_rate: l.tva_rate, total_ttc: lineTotals(l.quantity, l.unit_price_ttc, l.discount, l.tva_rate).ttc }));
+    expect(vatBreakdownOfLines(stored, 157, 389)).toEqual(vatBreakdown(lines, 157, 389));
   });
   it('met tout sur le taux le plus élevé quand les lignes ne coûtent rien', () => {
     expect(vatBreakdown([line(1, 500, 0, 500), line(1, 300, 20, 300)], 120)).toEqual([

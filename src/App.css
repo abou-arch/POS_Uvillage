@@ -227,7 +227,7 @@ input[type=number] { font-variant-numeric:tabular-nums; }
 
 /* Liste d'attente */
 .held-button { display:inline-flex; align-items:center; gap:8px; height:38px; padding:0 12px; background:transparent; border:1px solid rgb(255 255 255 / .5); border-radius:8px; color:#fff; font-weight:500; }
-.held-button:hover { background:rgb(255 255 255 / .12); }
+.held-button:hover:not(:disabled) { background:rgb(255 255 255 / .12); } .held-button:disabled { opacity:.5; }
 .held-button .count { min-width:22px; height:22px; padding:0 6px; background:#fff; border-radius:999px; color:var(--blue); font-size:13px; font-weight:700; line-height:22px; text-align:center; }
 .held { max-height:min(60vh, 520px); overflow:auto; padding:12px 20px 20px; }
 .held ul { display:grid; gap:10px; margin:0; padding:0; list-style:none; }
@@ -250,6 +250,7 @@ input[type=number] { font-variant-numeric:tabular-nums; }
   .actions { grid-template-columns:repeat(4, minmax(0, 1fr)); gap:8px; }
   .action { min-height:52px; padding:8px 10px; } .action .icon, .action small { display:none; }
   .chips { max-height:112px; }
+  .topbar .label { display:none; }
 }
 @media (max-width: 860px) {
   .pos { height:auto; min-height:100vh; }
@@ -257,3 +258,27 @@ input[type=number] { font-variant-numeric:tabular-nums; }
   .lines, .grid { max-height:60vh; }
   .topbar .who { display:none; }
 }
+
+/* Ticket 80 mm (imprimante thermique) : caché à l'écran ; à l'impression, il est seul sur la page.
+   Le format du papier vient du pilote de l'imprimante ; le ticket occupe les ~72 mm imprimables, sans marge. */
+.ticket-print { display:none; }
+@media print {
+  @page { margin:0; }
+  body { background:#fff; }
+  body > :not(.ticket-print) { display:none !important; }
+  .ticket-print { display:block; }
+}
+.receipt { width:72mm; margin:0 auto; padding:2mm 0 8mm; color:#000; font:12px/1.35 ui-monospace, Consolas, 'Courier New', monospace; }
+.receipt hr { margin:5px 0; border:0; border-top:1px dashed #000; }
+.receipt p { margin:4px 0; }
+.t-center { text-align:center; } .t-strong { font-weight:700; }
+.t-store { display:block; margin-bottom:2px; font-size:15px; }
+.t-row { display:flex; justify-content:space-between; gap:8px; }
+.t-row > span:first-child { min-width:0; overflow-wrap:anywhere; white-space:pre-wrap; }
+.t-row > span:last-child { flex:none; white-space:nowrap; text-align:right; }
+.t-line + .t-line { margin-top:3px; } .t-name { font-weight:700; overflow-wrap:anywhere; }
+.t-total { margin-top:2px; font-size:15px; font-weight:700; }
+.t-vat { width:100%; border-collapse:collapse; } .t-vat th { font-weight:700; }
+.t-vat th, .t-vat td { padding:0; text-align:right; } .t-vat th:first-child, .t-vat td:first-child { text-align:left; }
+.receipt footer { margin-top:6px; }
+.receipt :lang(ar) { font-family:Tahoma, Arial, sans-serif; } /* une police à chasse fixe étire l'arabe */

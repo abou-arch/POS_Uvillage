@@ -38,11 +38,19 @@ export function allocate(amount, weights) {
  * (tout sur le taux le plus élevé si ce TTC est nul), puis chaque taux est décomposé en HT + TVA.
  */
 export function vatBreakdown(lines, otherCharges = 0, globalDiscount = 0) {
+  const priced = lines.map((l) => ({
+    tva_rate: l.tva_rate, total_ttc: lineTotals(l.quantity, l.unit_price_ttc, l.discount ?? 0, l.tva_rate).ttc,
+  }));
+  return vatBreakdownOfLines(priced, otherCharges, globalDiscount);
+}
+
+/**
+ * Même récapitulatif, à partir du `total_ttc` déjà calculé de chaque ligne (celui d'une vente enregistrée) :
+ * le ticket imprime ainsi les montants de la vente, sans repartir des prix et des quantités.
+ */
+export function vatBreakdownOfLines(lines, otherCharges = 0, globalDiscount = 0) {
   const ttcByRate = new Map();
-  for (const l of lines) {
-    const { ttc } = lineTotals(l.quantity, l.unit_price_ttc, l.discount ?? 0, l.tva_rate);
-    ttcByRate.set(l.tva_rate, (ttcByRate.get(l.tva_rate) ?? 0) + ttc);
-  }
+  for (const l of lines) ttcByRate.set(l.tva_rate, (ttcByRate.get(l.tva_rate) ?? 0) + l.total_ttc);
   const adjustment = otherCharges - globalDiscount;
   if (ttcByRate.size === 0) return adjustment === 0 ? [] : [{ rate: 0, ...split(adjustment, 0) }];
   const rates = [...ttcByRate.keys()].sort((a, b) => b - a);

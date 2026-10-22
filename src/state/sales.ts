@@ -32,7 +32,7 @@ const isLine = (v: unknown): v is SaleLine =>
   isRecord(v) && isId(v.product_id) && typeof v.name === 'string' && isQuantity(v.quantity)
   && isCents(v.unit_price_ttc) && isCents(v.discount) && isRate(v.tva_rate)
   && isCents(v.total_ht) && isCents(v.total_tva) && isCents(v.total_ttc);
-const isSale = (v: unknown): v is Sale =>
+export const isSale = (v: unknown): v is Sale =>
   isRecord(v) && typeof v.id === 'string' && UUID_V4.test(v.id) && isId(v.number)
   && isId(v.store_id) && isId(v.register_id) && isId(v.cashier_id) && (v.customer_id === null || isId(v.customer_id))
   && isDate(v.created_at) && Array.isArray(v.lines) && v.lines.length > 0 && v.lines.every(isLine)
