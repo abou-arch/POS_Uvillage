@@ -3,7 +3,12 @@ import { Icon } from './ui';
 
 // Fenêtre modale sur <dialog> : le focus reste dedans, Échap ferme, le fond est assombri.
 // Le champ marqué data-autofocus reçoit le focus à l'ouverture.
-export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+export function Modal({ title, onClose, className = '', children }: {
+  title: string;
+  onClose: () => void;
+  className?: string;
+  children: ReactNode;
+}) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
 
@@ -16,7 +21,7 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
   }, []);
 
   return (
-    <dialog ref={ref} className="modal" aria-labelledby={titleId} onCancel={(e) => { e.preventDefault(); onClose(); }}>
+    <dialog ref={ref} className={`modal ${className}`} aria-labelledby={titleId} onCancel={(e) => { e.preventDefault(); onClose(); }}>
       <header>
         <h2 id={titleId}>{title}</h2>
         <button type="button" className="close" aria-label="Fermer" onClick={onClose}><Icon name="x" /></button>

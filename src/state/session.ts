@@ -1,4 +1,5 @@
 // Session de la caisse : connexion, magasin et caisse choisis, conservés dans localStorage pour survivre à un F5.
+import { browserStorage, isId, isRecord } from '../lib/storage';
 import type { Auth, Register, Session, Store, User } from '../types';
 
 export const SESSION_KEY = 'pos.session';
@@ -30,17 +31,6 @@ export function selectRegister(auth: Auth, storeId?: string, registerId?: string
   return chosen ? { ...base, ...chosen } : base;
 }
 
-type StorageLike = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
-
-// localStorage peut être indisponible (stockage bloqué) : la caisse fonctionne alors sans mémoire.
-function browserStorage(): StorageLike | null {
-  try {
-    return window.localStorage;
-  } catch {
-    return null;
-  }
-}
-
 export function saveSession(session: Auth | Session, storage = browserStorage()) {
   try {
     storage?.setItem(SESSION_KEY, JSON.stringify(session));
@@ -58,8 +48,6 @@ export function clearSession(storage = browserStorage()) {
   }
 }
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
-const isId = (v: unknown): v is string => typeof v === 'string' && v !== '';
 const isUser = (v: unknown): v is User =>
   isRecord(v) && isId(v.id) && typeof v.name === 'string' && ['admin', 'manager', 'cashier'].includes(v.role as string);
 const isRegister = (v: unknown): v is Register => isRecord(v) && isId(v.id) && typeof v.name === 'string';

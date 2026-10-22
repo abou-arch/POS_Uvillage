@@ -1,6 +1,6 @@
 # Contrat d'API — Caisse (POS) ↔ Application web
 
-Version 0.2 — proposition à valider par l'équipe. (0.2 : les clients sont identifiés par leur matricule universitaire au lieu de l'ICE.)
+Version 0.3 — proposition à valider par l'équipe. (0.2 : les clients sont identifiés par leur matricule universitaire au lieu de l'ICE ; 0.3 : la TVA des autres charges et de la remise globale est répartie par taux, voir §7.)
 
 La caisse (POS) est développée séparément de l'application web (back-office). Ce document fixe ce que la caisse attend de l'API, pour que les deux parties avancent en parallèle. La caisse fonctionne d'abord sur une fausse API (`mock-api/`) qui respecte exactement ce contrat.
 
@@ -190,7 +190,16 @@ total_ht  = round(total_ttc × 100 / (100 + tva_rate))
 total_tva = total_ttc − total_ht
 ```
 
-Les totaux de la vente sont la somme des lignes, puis `+ other_charges − global_discount` (appliqués sur le TTC ; la ventilation de la TVA sur ces montants est à valider avec le comptable). La caisse et l'API doivent utiliser **la même règle d'arrondi** ; l'API recalcule et refuse une vente dont les totaux diffèrent de plus d'1 centime (`422 TOTALS_MISMATCH`).
+Les totaux de la vente (`totals`) se calculent **par taux de TVA**, comme le récapitulatif imprimé sur le ticket :
+
+1. TTC du taux = somme des `total_ttc` des lignes de ce taux.
+2. `other_charges − global_discount` est réparti entre les taux au prorata de ces TTC, au centime près (méthode des plus forts restes). Si le TTC des lignes est nul, tout va sur le taux le plus élevé.
+3. Pour chaque taux : `ht = round(ttc × 100 / (100 + taux))`, puis `tva = ttc − ht`.
+4. `totals` = somme des taux. On a donc toujours HT + TVA = TTC.
+
+Exemple : 10 DH à 20 % + 5 DH à 0 %, remise globale de 3 DH → 2 DH de remise sur le 20 % (TTC 8,00 = HT 6,67 + TVA 1,33) et 1 DH sur le 0 % (TTC 4,00) → totaux HT 10,67, TVA 1,33, TTC 12,00.
+
+Règle proposée, **à valider avec le comptable**. Implémentation de référence : `src/lib/totals.js` (`vatBreakdown`, `saleTotals`), utilisée par la caisse et par la fausse API. La caisse et l'API doivent utiliser **la même règle d'arrondi** ; l'API recalcule et refuse une vente dont les totaux (HT, TVA ou TTC) diffèrent de plus d'1 centime (`422 TOTALS_MISMATCH`).
 
 ## 8. Points à trancher en équipe
 

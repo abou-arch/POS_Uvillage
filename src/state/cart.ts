@@ -30,13 +30,30 @@ const clamp = (n: number, min: number, max: number) => Math.min(Math.max(Number.
 /** Un SMS n'est possible que si le client a un téléphone (le client de passage n'en a pas). */
 export const canSendSms = (state: CartState) => !!state.customer?.phone;
 
+const lineGross = (l: CartLine) => Math.round(l.quantity * l.unit_price_ttc);
+
+/**
+ * Une remise ne dépasse jamais ce qu'elle réduit, sinon le total deviendrait négatif :
+ * remise de ligne ≤ montant de la ligne (même après une baisse de quantité),
+ * remise globale ≤ total des lignes + autres charges (même après le retrait d'un article).
+ */
+function withinLimits(state: CartState): CartState {
+  const lines = state.lines.map((l) => (l.discount > lineGross(l) ? { ...l, discount: lineGross(l) } : l));
+  const maxGlobal = lines.reduce((s, l) => s + lineGross(l) - l.discount, 0) + state.otherCharges;
+  return { ...state, lines, globalDiscount: Math.min(state.globalDiscount, maxGlobal) };
+}
+
 export function cartReducer(state: CartState, action: CartAction): CartState {
+  return withinLimits(apply(state, action));
+}
+
+function apply(state: CartState, action: CartAction): CartState {
   switch (action.type) {
     case 'add': {
       const p = action.product;
       const existing = state.lines.find((l) => l.product_id === p.id);
       if (existing) {
-        return cartReducer(state, { type: 'setQuantity', productId: p.id, quantity: existing.quantity + 1 });
+        return apply(state, { type: 'setQuantity', productId: p.id, quantity: existing.quantity + 1 });
       }
       const line: CartLine = {
         product_id: p.id, name: p.name, quantity: 1, unit_price_ttc: p.price_ttc,

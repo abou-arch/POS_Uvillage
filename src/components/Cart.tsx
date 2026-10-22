@@ -1,26 +1,55 @@
-import { useRef, useState, type Dispatch, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type Dispatch, type FormEvent } from 'react';
 import { formatMad, lineTotals, saleTotals } from '../lib/totals.js';
 import { canSendSms, type CartAction, type CartState } from '../state/cart';
-import type { Product } from '../types';
+import type { LastSale } from '../state/sales';
+import type { Payment, Product } from '../types';
+import { CashModal } from './CashModal';
 import { CustomerPicker } from './CustomerPicker';
+import { LastSalePanel } from './LastSalePanel';
+import { MultiPaymentModal } from './MultiPaymentModal';
 import { Icon } from './ui';
 
 interface Props {
   cart: CartState;
   dispatch: Dispatch<CartAction>;
   products: Product[];
+  lastSale: LastSale | null;
+  onCheckout: (payments: Payment[], amountReceived: number) => void;
 }
 
 const formatQuantity = (q: number) => q.toLocaleString('fr-FR', { maximumFractionDigits: 3 });
 
-export function Cart({ cart, dispatch, products }: Props) {
+export function Cart({ cart, dispatch, products, lastSale, onCheckout }: Props) {
   const scanRef = useRef<HTMLInputElement>(null);
   const [notFound, setNotFound] = useState<string | null>(null);
+  const [paying, setPaying] = useState<'cash' | 'multiple' | null>(null);
   const totals = saleTotals(cart.lines, cart.otherCharges, cart.globalDiscount);
   const quantity = cart.lines.reduce((n, l) => n + l.quantity, 0);
+  const payable = cart.lines.length > 0 && totals.ttc > 0;
   const setQuantity = (productId: string, q: number) => dispatch({ type: 'setQuantity', productId, quantity: q });
   // Après le choix du client ou la fermeture d'une fenêtre, la douchette doit retrouver son champ.
   const focusScan = () => setTimeout(() => scanRef.current?.focus(), 0);
+
+  function pay(payments: Payment[], amountReceived: number) {
+    setPaying(null);
+    onCheckout(payments, amountReceived);
+    focusScan();
+  }
+  const payExact = () => pay([{ method: 'cash', amount: totals.ttc }], totals.ttc);
+
+  // Raccourcis de Falcon POS : F2 = Espèces, F4 = Montant exact (« Pay All »). Échap ferme les fenêtres.
+  // Réinscrit à chaque rendu (pas de liste de dépendances) : le raccourci voit toujours le total à jour.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'F2' && e.key !== 'F4') return;
+      e.preventDefault();
+      if (!payable || document.querySelector('dialog[open]')) return;
+      if (e.key === 'F2') setPaying('cash');
+      else payExact();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
 
   // Une douchette tape le code puis « Entrée » : on traite donc la saisie comme un formulaire.
   function scan(e: FormEvent) {
@@ -51,7 +80,9 @@ export function Cart({ cart, dispatch, products }: Props) {
           onChange={(customer) => dispatch({ type: 'setCustomer', customer })} />
       </div>
 
-      {cart.lines.length === 0 ? (
+      {cart.lines.length === 0 && lastSale ? (
+        <LastSalePanel last={lastSale} />
+      ) : cart.lines.length === 0 ? (
         <div className="empty">
           <Icon name="cart" size={44} />
           <strong>Le panier est vide</strong>
@@ -135,15 +166,31 @@ export function Cart({ cart, dispatch, products }: Props) {
         </div>
       </div>
 
-      {/* Sprints vendredi / samedi : brancher paiement, mise en attente et ticket. Même ordre que Falcon POS. */}
+      {/* Même ordre que Falcon POS. Sprint samedi : mise en attente. */}
       <div className="actions">
         <button className="action hold" disabled><strong><Icon name="pause" size={18} />Mise en attente</strong><small>Reprendre plus tard</small></button>
         {/* « Multiple » de Falcon POS : plusieurs moyens de paiement pour une vente. */}
-        <button className="action multiple" disabled><strong><Icon name="card" size={18} />Paiement mixte</strong><small>Carte, mobile, crédit…</small></button>
-        <button className="action cash" disabled><strong><Icon name="cash" size={18} />Espèces</strong><small>Avec rendu de monnaie</small></button>
+        <button className="action multiple" disabled={!payable} onClick={() => setPaying('multiple')}>
+          <strong><Icon name="card" size={18} />Paiement mixte</strong><small>Carte, mobile, crédit…</small>
+        </button>
+        <button className="action cash" disabled={!payable} onClick={() => setPaying('cash')}>
+          <strong><Icon name="cash" size={18} />Espèces</strong><small>Avec rendu de monnaie · F2</small>
+        </button>
         {/* « Pay All » de Falcon POS : tout le total en espèces, sans fenêtre. */}
-        <button className="action exact" disabled><strong><Icon name="check" size={18} />Montant exact</strong><small>Espèces, sans rendu</small></button>
+        <button className="action exact" disabled={!payable} onClick={payExact}>
+          <strong><Icon name="check" size={18} />Montant exact</strong><small>Espèces, sans rendu · F4</small>
+        </button>
       </div>
+
+      {paying === 'cash' && (
+        <CashModal total={totals.ttc} onPay={(received) => pay([{ method: 'cash', amount: totals.ttc }], received)}
+          onClose={() => { setPaying(null); focusScan(); }} />
+      )}
+      {paying === 'multiple' && (
+        <MultiPaymentModal total={totals.ttc} hasCustomer={cart.customer !== null}
+          onPay={(payments) => pay(payments, payments.filter((p) => p.method === 'cash').reduce((s, p) => s + p.amount, 0))}
+          onClose={() => { setPaying(null); focusScan(); }} />
+      )}
     </section>
   );
 }

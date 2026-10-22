@@ -182,7 +182,44 @@ input[type=number] { font-variant-numeric:tabular-nums; }
 .modal input { height:44px; }
 .modal input[aria-invalid=true] { border-color:var(--red); }
 .modal input[aria-invalid=true]:focus { box-shadow:0 0 0 3px rgb(198 40 40 / .2); }
-.field-error { color:var(--red); font-size:13px; font-weight:500; }
+.field-error { margin:0; color:var(--red); font-size:13px; font-weight:500; }
+.modal.wide { width:min(560px, calc(100vw - 32px)); }
+
+/* Paiement */
+.pay-due { display:flex; align-items:baseline; justify-content:space-between; padding:12px 14px; background:#f3f6f9; border-radius:10px; }
+.pay-due span { color:var(--muted); font-size:13px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; }
+.pay-due strong { font-size:28px; font-variant-numeric:tabular-nums; }
+.pay-field .money { width:100%; color:var(--muted); font-size:18px; }
+.money.big input { width:100%; height:56px; font-size:26px; font-weight:700; }
+.bills { display:grid; grid-template-columns:repeat(4, 1fr); gap:8px; }
+.bills button { height:44px; background:#fff; border:1px solid var(--field); border-radius:8px; font-weight:600; }
+.bills button:hover { border-color:var(--blue); color:var(--blue); } .bills .wide { grid-column:span 2; }
+.change { display:flex; align-items:baseline; justify-content:space-between; padding:12px 14px; background:#f3f6f9; border-radius:10px; color:var(--muted); }
+.change strong { font-size:28px; font-variant-numeric:tabular-nums; }
+.change.ok { background:var(--green-soft); color:var(--green-dark); }
+.btn.validate { background:var(--green); color:#fff; } .btn.validate:hover:not(:disabled) { background:var(--green-dark); }
+.pay-rows { display:grid; gap:8px; }
+.pay-row { display:grid; grid-template-columns:minmax(0, 1fr) auto auto; align-items:center; gap:8px; }
+.pay-row select { height:44px; }
+.pay-row .money input { width:130px; height:44px; font-size:16px; }
+.pay-row .remove:disabled { visibility:hidden; }
+.add-payment { justify-self:start; }
+.pay-status { margin:0; padding:10px 12px; border-radius:8px; font-weight:600; }
+.pay-status.ok { background:var(--green-soft); color:var(--green-dark); }
+.pay-status.pending { background:var(--amber-soft); color:#7c3a06; }
+
+/* Vente encaissée (à la place du panier vide) */
+.last-sale { flex:1; min-height:0; display:grid; place-content:center; justify-items:center; gap:6px; padding:24px; border:2px solid var(--green-soft); border-radius:10px; text-align:center; }
+.last-sale > .icon { color:var(--green); }
+.last-sale .title { font-size:20px; } .last-sale .ticket { font-weight:600; font-variant-numeric:tabular-nums; }
+.change-due { display:grid; justify-items:center; margin:6px 0; padding:10px 28px; background:var(--green-soft); border-radius:12px; color:var(--green-dark); }
+.change-due span { font-size:13px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; }
+.change-due strong { font-size:36px; font-variant-numeric:tabular-nums; }
+.last-sale .sync { margin:4px 0 0; font-size:14px; font-weight:500; }
+.last-sale.sent .sync { color:var(--green-dark); } .last-sale.offline .sync { color:var(--amber); } .last-sale.rejected .sync { color:var(--red); }
+.last-sale.offline, .last-sale.rejected { border-color:var(--amber-soft); }
+.pending-badge { display:inline-flex; align-items:center; gap:6px; height:32px; padding:0 12px; background:var(--amber-soft); border:0; border-radius:999px; color:#7c3a06; font-size:13px; font-weight:600; white-space:nowrap; }
+.pending-badge:hover:not(:disabled) { background:#fde68a; }
 .modal-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:4px; }
 .btn.secondary { background:#fff; border-color:var(--field); color:var(--text); }
 .btn.secondary:hover { background:#f5f7fa; }

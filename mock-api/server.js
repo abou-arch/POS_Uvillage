@@ -9,8 +9,10 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const tokens = new Map(); // token -> user
-const err = (res, status, code, message, details = {}) => res.status(status).json({ error: { code, message, details } });
+// Tokens « tok.<id utilisateur>.<aléatoire> » : ils restent valables quand on relance la fausse API,
+// pratique pour tester les ventes faites pendant une coupure. Une vraie API signerait ses tokens.
+const userFromToken = (token) => (token?.startsWith('tok.') ? users.find((u) => u.id === token.split('.')[1]) : undefined);
+const err =(res, status, code, message, details = {}) => res.status(status).json({ error: { code, message, details } });
 
 // Latence simulée pour tester les états de chargement.
 app.use((_req, _res, next) => setTimeout(next, 150));
@@ -19,8 +21,7 @@ app.post('/api/auth/login', (req, res) => {
   const { username, password } = req.body ?? {};
   const user = users.find((u) => u.username === username && u.password === password);
   if (!user) return err(res, 401, 'BAD_CREDENTIALS', 'Identifiants incorrects');
-  const token = `tok_${crypto.randomUUID()}`;
-  tokens.set(token, user);
+  const token = `tok.${user.id}.${crypto.randomUUID()}`;
   res.json({
     token,
     user: { id: user.id, name: user.name, role: user.role },
@@ -29,8 +30,7 @@ app.post('/api/auth/login', (req, res) => {
 });
 
 app.use('/api', (req, res, next) => {
-  const token = req.headers.authorization?.replace('Bearer ', '');
-  const user = token && tokens.get(token);
+  const user = userFromToken(req.headers.authorization?.replace('Bearer ', ''));
   if (!user) return err(res, 401, 'UNAUTHENTICATED', 'Connexion requise');
   req.user = user;
   next();
@@ -65,9 +65,16 @@ app.post('/api/customers', (req, res) => {
 
 function createSale(sale) {
   if (sales.has(sale.id)) return { status: 200, body: { id: sale.id, status: 'duplicate', stock_warning: false } };
-  const expected = saleTotals(sale.lines, sale.other_charges, sale.global_discount);
-  if (Math.abs(expected.ttc - sale.totals?.ttc) > 1) {
+  const expected = saleTotals(sale.lines ?? [], sale.other_charges, sale.global_discount);
+  if (!['ht', 'tva', 'ttc'].every((k) => Math.abs(expected[k] - sale.totals?.[k]) <= 1)) {
     return { status: 422, body: { error: { code: 'TOTALS_MISMATCH', message: 'Totaux incohérents', details: { expected } } } };
+  }
+  // §5 : la somme des paiements ne dépasse pas le total ; moins que le total, ou du crédit, seulement pour un client.
+  const payments = sale.payments ?? [];
+  const paid = payments.reduce((s, p) => s + p.amount, 0);
+  const credit = paid < sale.totals.ttc || payments.some((p) => p.method === 'credit');
+  if (paid > sale.totals.ttc || (credit && !sale.customer_id)) {
+    return { status: 422, body: { error: { code: 'PAYMENTS_MISMATCH', message: 'Paiements incohérents', details: { paid } } } };
   }
   let stock_warning = false;
   for (const line of sale.lines) {

@@ -2,6 +2,7 @@
 import type { Auth, Brand, Category, Customer, Product, Sale } from '../types';
 
 const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:4000/api';
+const TIMEOUT_MS = 10_000; // la caisse ne doit pas rester bloquée quand le réseau ne répond plus
 
 export class ApiError extends Error {
   status: number;
@@ -24,6 +25,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const sentToken = token;
   const res = await fetch(`${BASE}${path}`, {
     ...init,
+    signal: init.signal ?? AbortSignal.timeout(TIMEOUT_MS),
     headers: {
       'Content-Type': 'application/json',
       ...(sentToken ? { Authorization: `Bearer ${sentToken}` } : {}),
