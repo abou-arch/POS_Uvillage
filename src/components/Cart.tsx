@@ -5,6 +5,7 @@ import type { LastSale } from '../state/sales';
 import type { Payment, Product } from '../types';
 import { CashModal } from './CashModal';
 import { CustomerPicker } from './CustomerPicker';
+import { HoldModal } from './HoldModal';
 import { LastSalePanel } from './LastSalePanel';
 import { MultiPaymentModal } from './MultiPaymentModal';
 import { Icon } from './ui';
@@ -15,14 +16,15 @@ interface Props {
   products: Product[];
   lastSale: LastSale | null;
   onCheckout: (payments: Payment[], amountReceived: number) => void;
+  onHold: (note: string) => void;
 }
 
 const formatQuantity = (q: number) => q.toLocaleString('fr-FR', { maximumFractionDigits: 3 });
 
-export function Cart({ cart, dispatch, products, lastSale, onCheckout }: Props) {
+export function Cart({ cart, dispatch, products, lastSale, onCheckout, onHold }: Props) {
   const scanRef = useRef<HTMLInputElement>(null);
   const [notFound, setNotFound] = useState<string | null>(null);
-  const [paying, setPaying] = useState<'cash' | 'multiple' | null>(null);
+  const [paying, setPaying] = useState<'cash' | 'multiple' | 'hold' | null>(null);
   const totals = saleTotals(cart.lines, cart.otherCharges, cart.globalDiscount);
   const quantity = cart.lines.reduce((n, l) => n + l.quantity, 0);
   const payable = cart.lines.length > 0 && totals.ttc > 0;
@@ -166,9 +168,9 @@ export function Cart({ cart, dispatch, products, lastSale, onCheckout }: Props) 
         </div>
       </div>
 
-      {/* Même ordre que Falcon POS. Sprint samedi : mise en attente. */}
+      {/* Même ordre que Falcon POS. */}
       <div className="actions">
-        <button className="action hold" disabled><strong><Icon name="pause" size={18} />Mise en attente</strong><small>Reprendre plus tard</small></button>
+        <button className="action hold" disabled={cart.lines.length === 0} onClick={() => setPaying('hold')}><strong><Icon name="pause" size={18} />Mise en attente</strong><small>Reprendre plus tard</small></button>
         {/* « Multiple » de Falcon POS : plusieurs moyens de paiement pour une vente. */}
         <button className="action multiple" disabled={!payable} onClick={() => setPaying('multiple')}>
           <strong><Icon name="card" size={18} />Paiement mixte</strong><small>Carte, mobile, crédit…</small>
@@ -189,6 +191,11 @@ export function Cart({ cart, dispatch, products, lastSale, onCheckout }: Props) 
       {paying === 'multiple' && (
         <MultiPaymentModal total={totals.ttc} hasCustomer={cart.customer !== null}
           onPay={(payments) => pay(payments, payments.filter((p) => p.method === 'cash').reduce((s, p) => s + p.amount, 0))}
+          onClose={() => { setPaying(null); focusScan(); }} />
+      )}
+      {paying === 'hold' && (
+        <HoldModal total={totals.ttc} articles={quantity}
+          onHold={(note) => { setPaying(null); onHold(note); focusScan(); }}
           onClose={() => { setPaying(null); focusScan(); }} />
       )}
     </section>

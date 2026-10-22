@@ -1,12 +1,16 @@
 import { useEffect, useReducer, useState } from 'react';
 import { api, ApiError } from '../api/client';
 import { buildSale, decrementStock } from '../lib/buildSale';
+import { formatMad } from '../lib/totals.js';
 import { uuidv4 } from '../lib/uuid';
 import { cartReducer, emptyCart, type CartAction } from '../state/cart';
+import { holdCart, refreshFromCatalog } from '../state/held';
+import { useHeldSales } from '../state/useHeldSales';
 import { lastCounter, saveCounter, sendSale, type LastSale } from '../state/sales';
 import { usePendingSales } from '../state/usePendingSales';
 import type { Brand, Category, Payment, Product, Sale, Session } from '../types';
 import { Cart } from './Cart';
+import { HeldListModal } from './HeldListModal';
 import { ProductGrid } from './ProductGrid';
 import { Avatar, Icon } from './ui';
 
@@ -18,7 +22,10 @@ export function PosScreen({ session, onLogout }: { session: Session; onLogout: (
   const [cart, dispatch] = useReducer(cartReducer, emptyCart);
   const [lastSale, setLastSale] = useState<LastSale | null>(null);
   const [resending, setResending] = useState(false);
+  const [showHeld, setShowHeld] = useState(false);
+  const [resumeNotice, setResumeNotice] = useState<string | null>(null);
   const pending = usePendingSales();
+  const held = useHeldSales(session.registerId);
 
   const store = session.stores.find((s) => s.id === session.storeId);
   const register = store?.registers.find((r) => r.id === session.registerId);
@@ -40,6 +47,7 @@ export function PosScreen({ session, onLogout }: { session: Session; onLogout: (
     pending.add(sale);
     dispatch({ type: 'clear' });
     setError(null);
+    setResumeNotice(null);
     setProducts((list) => decrementStock(list, sale.lines));
     setLastSale({ sale, status: 'sending' });
     const result = await sendSale(sale, api.createSale);
@@ -58,6 +66,34 @@ export function PosScreen({ session, onLogout }: { session: Session; onLogout: (
       else break; // toujours pas de réseau : inutile d'insister
     }
     setResending(false);
+  }
+
+  // Mise en attente : le panier est gardé sur la caisse (jamais envoyé), puis vidé pour le client suivant.
+  function hold(note: string) {
+    held.add(holdCart(cart, note, uuidv4(), new Date()));
+    dispatch({ type: 'clear' });
+    setResumeNotice(null);
+  }
+
+  // Reprise : prix et stock repris du catalogue actuel ; le caissier voit ce qui a changé.
+  function resume(id: string, holdCurrent: boolean) {
+    const sale = held.list.find((h) => h.id === id);
+    if (!sale) return;
+    if (holdCurrent && cart.lines.length > 0) held.add(holdCart(cart, '', uuidv4(), new Date()));
+    const { cart: refreshed, changes, missing, checked } = refreshFromCatalog(sale.cart, products);
+    held.remove(id);
+    setLastSale(null);
+    dispatch({ type: 'restore', state: refreshed });
+    setShowHeld(false);
+    const notes = [
+      ...(!checked ? ['Catalogue non chargé : prix et stock non vérifiés.'] : []),
+      ...(changes.length > 0
+        ? [`Prix changé depuis la mise en attente : ${changes.map((c) => `${c.name} ${formatMad(c.before)} → ${formatMad(c.after)}`).join(', ')}.`]
+        : []),
+      ...(missing.length > 0 ? [`Absent du catalogue, à vérifier : ${missing.join(', ')}.`] : []),
+    ];
+    setResumeNotice(notes.length > 0 ? notes.join(' ') : null);
+    document.getElementById('scan')?.focus();
   }
 
   // Le résumé de la vente précédente disparaît dès qu'un article du client suivant est ajouté.
@@ -98,10 +134,32 @@ export function PosScreen({ session, onLogout }: { session: Session; onLogout: (
           </button>
         )}
         <span className="spacer" />
+        <button className="held-button" onClick={() => setShowHeld(true)}>
+          <Icon name="pause" size={18} />Liste d’attente<span className="count">{held.list.length}</span>
+        </button>
         <span className="who"><Avatar name={session.user.name} />{session.user.name}</span>
         <button className="btn ghost" onClick={onLogout}><Icon name="logout" size={18} />Déconnexion</button>
       </header>
       {error && <p className="banner"><Icon name="alert" size={18} />{error}</p>}
+      {resumeNotice && (
+        <p className="banner notice" role="status">
+          <Icon name="alert" size={18} />{resumeNotice}
+          <button type="button" className="link" onClick={() => setResumeNotice(null)}>Compris</button>
+        </p>
+      )}
+      {!held.saved && (
+        <p className="banner">
+          <Icon name="alert" size={18} />Stockage local indisponible : les ventes en attente seront perdues au rechargement.
+        </p>
+      )}
+      {held.unreadable > 0 && (
+        <p className="banner">
+          <Icon name="alert" size={18} />
+          {held.unreadable === 1
+            ? 'Une vente en attente est illisible : elle reste sur ce poste, à faire vérifier.'
+            : `${held.unreadable} ventes en attente sont illisibles : elles restent sur ce poste, à faire vérifier.`}
+        </p>
+      )}
       {!pending.saved && (
         <p className="banner">
           <Icon name="alert" size={18} />Stockage local indisponible : ne fermez pas la caisse avant l’envoi des ventes.
@@ -116,13 +174,17 @@ export function PosScreen({ session, onLogout }: { session: Session; onLogout: (
         </p>
       )}
       <main>
-        <Cart cart={cart} dispatch={cartDispatch} products={products} lastSale={lastSale} onCheckout={checkout} />
+        <Cart cart={cart} dispatch={cartDispatch} products={products} lastSale={lastSale} onCheckout={checkout} onHold={hold} />
         <ProductGrid products={products} categories={categories} brands={brands}
           onAdd={(product) => {
             cartDispatch({ type: 'add', product });
             document.getElementById('scan')?.focus(); // la douchette reste prête après un clic sur une tuile
           }} />
       </main>
+      {showHeld && (
+        <HeldListModal list={held.list} cartEmpty={cart.lines.length === 0} onResume={resume} onDelete={held.remove}
+          onClose={() => { setShowHeld(false); document.getElementById('scan')?.focus(); }} />
+      )}
     </div>
   );
 }

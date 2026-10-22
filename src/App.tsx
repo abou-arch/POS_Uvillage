@@ -41,5 +41,5 @@ export default function App() {
     return <StorePicker auth={session} onLogout={() => update(null)}
       onSelect={(storeId, registerId) => update(selectRegister(session, storeId, registerId))} />;
   }
-  return <PosScreen session={session} onLogout={() => update(null)} />;
+  return <PosScreen key={session.registerId} session={session} onLogout={() => update(null)} />;
 }

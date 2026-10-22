@@ -221,6 +221,22 @@ input[type=number] { font-variant-numeric:tabular-nums; }
 .pending-badge { display:inline-flex; align-items:center; gap:6px; height:32px; padding:0 12px; background:var(--amber-soft); border:0; border-radius:999px; color:#7c3a06; font-size:13px; font-weight:600; white-space:nowrap; }
 .pending-badge:hover:not(:disabled) { background:#fde68a; }
 .modal-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:4px; }
+.btn.danger { background:var(--red); color:#fff; } .btn.danger:hover { background:#a31f1f; }
+.banner.notice { background:var(--amber-soft); color:#7c3a06; }
+.banner .link { margin-left:auto; color:inherit; }
+
+/* Liste d'attente */
+.held-button { display:inline-flex; align-items:center; gap:8px; height:38px; padding:0 12px; background:transparent; border:1px solid rgb(255 255 255 / .5); border-radius:8px; color:#fff; font-weight:500; }
+.held-button:hover { background:rgb(255 255 255 / .12); }
+.held-button .count { min-width:22px; height:22px; padding:0 6px; background:#fff; border-radius:999px; color:var(--blue); font-size:13px; font-weight:700; line-height:22px; text-align:center; }
+.held { max-height:min(60vh, 520px); overflow:auto; padding:12px 20px 20px; }
+.held ul { display:grid; gap:10px; margin:0; padding:0; list-style:none; }
+.held li { display:grid; grid-template-columns:1fr auto; align-items:center; gap:8px 14px; padding:12px 14px; border:1px solid var(--line); border-radius:10px; }
+.held-info { display:grid; gap:2px; min-width:0; } .held-info span { overflow-wrap:anywhere; font-size:13px; }
+.held-total { font-size:18px; font-variant-numeric:tabular-nums; }
+.held-actions, .held-confirm { grid-column:1 / -1; display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:8px; }
+.held-confirm span { margin-right:auto; font-size:14px; font-weight:500; }
+.held .btn { height:38px; }
 .btn.secondary { background:#fff; border-color:var(--field); color:var(--text); }
 .btn.secondary:hover { background:#f5f7fa; }
 
