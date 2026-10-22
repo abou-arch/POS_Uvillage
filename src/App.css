@@ -218,8 +218,12 @@ input[type=number] { font-variant-numeric:tabular-nums; }
 .last-sale .sync { margin:4px 0 0; font-size:14px; font-weight:500; }
 .last-sale.sent .sync { color:var(--green-dark); } .last-sale.offline .sync { color:var(--amber); } .last-sale.rejected .sync { color:var(--red); }
 .last-sale.offline, .last-sale.rejected { border-color:var(--amber-soft); }
-.pending-badge { display:inline-flex; align-items:center; gap:6px; height:32px; padding:0 12px; background:var(--amber-soft); border:0; border-radius:999px; color:#7c3a06; font-size:13px; font-weight:600; white-space:nowrap; }
-.pending-badge:hover:not(:disabled) { background:#fde68a; }
+.sync-status { display:inline-flex; align-items:center; gap:6px; height:32px; padding:0 12px; background:rgb(255 255 255 / .14); border:0; border-radius:999px; color:#fff; font-size:13px; font-weight:600; white-space:nowrap; }
+.sync-status:hover:not(:disabled) { background:rgb(255 255 255 / .24); } .sync-status:disabled { cursor:progress; }
+.sync-status .led { width:9px; height:9px; border-radius:50%; background:#4ade80; box-shadow:0 0 0 2px rgb(255 255 255 / .35); }
+.sync-status.offline { background:var(--amber-soft); color:#7c3a06; } .sync-status.offline .led { background:var(--amber); }
+.sync-status.syncing .led { background:#fde68a; }
+.sync-status .sep { opacity:.6; } .sync-status .rejected { color:#fecaca; } .sync-status.offline .rejected { color:var(--red); }
 .modal-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:4px; }
 .btn.danger { background:var(--red); color:#fff; } .btn.danger:hover { background:#a31f1f; }
 .banner.notice { background:var(--amber-soft); color:#7c3a06; }
@@ -250,7 +254,8 @@ input[type=number] { font-variant-numeric:tabular-nums; }
   .actions { grid-template-columns:repeat(4, minmax(0, 1fr)); gap:8px; }
   .action { min-height:52px; padding:8px 10px; } .action .icon, .action small { display:none; }
   .chips { max-height:112px; }
-  .topbar .label { display:none; }
+  .topbar .label, .topbar .who { display:none; } .topbar { gap:10px; }
+  .held-button, .topbar .btn.ghost { white-space:nowrap; }
 }
 @media (max-width: 860px) {
   .pos { height:auto; min-height:100vh; }

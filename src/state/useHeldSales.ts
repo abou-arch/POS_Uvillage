@@ -1,23 +1,21 @@
-// Ventes en attente de la caisse : chaque changement est écrit tout de suite dans localStorage.
-import { useCallback, useMemo, useRef, useState } from 'react';
-import { loadHeld, saveHeld, type HeldSale } from './held';
+// Ventes en attente de la caisse, dans IndexedDB : la liste se met à jour d'elle-même à chaque changement.
+import { db } from '../db/db';
+import { useLiveQuery } from '../db/useLiveQuery';
+import { isHeldSale, type HeldSale } from './held';
 
 export function useHeldSales(registerId: string) {
-  const [held, setHeld] = useState(() => loadHeld(registerId));
-  const [saved, setSaved] = useState(true); // false : stockage local indisponible
-  const current = useRef(held);
+  const { value, error } = useLiveQuery(
+    () => db.held.where('register_id').equals(registerId).sortBy('held_at'),
+    [registerId],
+    [],
+  );
+  const list: HeldSale[] = value.filter(isHeldSale).map(({ id, held_at, note, cart }) => ({ id, held_at, note, cart }));
 
-  const commit = useCallback((change: (l: HeldSale[]) => HeldSale[]) => {
-    current.current = { ...current.current, sales: change(current.current.sales) };
-    setSaved(saveHeld(registerId, current.current));
-    setHeld(current.current);
-  }, [registerId]);
-
-  return useMemo(() => ({
-    list: held.sales,
-    unreadable: held.unreadable.length,
-    saved,
-    add: (sale: HeldSale) => commit((l) => [...l, sale]),
-    remove: (id: string) => commit((l) => l.filter((h) => h.id !== id)),
-  }), [held, saved, commit]);
+  return {
+    list,
+    unreadable: value.length - list.length, // ni reprises ni effacées, à faire vérifier
+    saved: error === null,
+    add: (sale: HeldSale) => db.held.put({ ...sale, register_id: registerId }),
+    remove: (id: string) => db.held.delete(id),
+  };
 }

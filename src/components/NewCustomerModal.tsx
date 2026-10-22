@@ -1,5 +1,6 @@
 import { useState, type ChangeEvent, type FormEvent } from 'react';
 import { api, ApiError } from '../api/client';
+import { rememberCustomer } from '../db/customers';
 import { uuidv4 } from '../lib/uuid';
 import { buildCustomer, MAX_MATRICULE_LENGTH, MAX_NAME_LENGTH, type CustomerErrors, type CustomerForm } from '../state/customers';
 import type { Customer } from '../types';
@@ -33,7 +34,9 @@ export function NewCustomerModal({ initial, onCreated, onClose }: {
     setSaving(true);
     setFailure(null);
     try {
-      onCreated(await api.createCustomer(result.customer));
+      const created = await api.createCustomer(result.customer);
+      void rememberCustomer(created); // retrouvable hors ligne
+      onCreated(created);
     } catch (err) {
       setFailure(err instanceof ApiError ? err.message : 'Serveur injoignable : le client n’est pas enregistré.');
       setSaving(false);

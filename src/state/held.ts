@@ -1,5 +1,5 @@
 // Ventes en attente (bouton « Mise en attente ») : propres à la caisse, jamais envoyées à l'API (cf. contrat, fin).
-// Elles sont gardées dans localStorage, une liste par caisse, et survivent à un rechargement.
+// Elles vivent dans IndexedDB (table held) ; loadHeld/saveHeld lisent l'ancien emplacement localStorage, pour la migration.
 import { browserStorage, isId, isRecord, readText, writeJson } from '../lib/storage';
 import type { CartLine, Customer, Product } from '../types';
 import { MAX_QUANTITY, type CartState } from './cart';
@@ -29,7 +29,7 @@ const isCart = (v: unknown): v is CartState =>
   isRecord(v) && Array.isArray(v.lines) && v.lines.length > 0 && v.lines.every(isLine)
   && (v.customer === null || isCustomer(v.customer))
   && isCents(v.otherCharges) && isCents(v.globalDiscount) && typeof v.sendSms === 'boolean';
-const isHeldSale = (v: unknown): v is HeldSale =>
+export const isHeldSale = (v: unknown): v is HeldSale =>
   isRecord(v) && isId(v.id) && typeof v.held_at === 'string' && ISO_UTC.test(v.held_at)
   && typeof v.note === 'string' && isCart(v.cart);
 

@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "cors": "^2.8.6",
+    "dexie": "^4.4.6",
     "express": "^5.2.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
@@ -27,6 +28,7 @@
     "oxlint": "^1.81.0",
     "typescript": "~6.0.2",
     "vite": "^8.3.0",
+    "vite-plugin-pwa": "^2.0.0",
     "vitest": "^5.0.3"
   }
 }

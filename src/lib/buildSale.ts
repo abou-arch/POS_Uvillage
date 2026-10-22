@@ -61,7 +61,7 @@ export function buildSale(input: SaleInput): Sale {
 }
 
 /** Stock affiché après une vente : chaque article perd la quantité vendue (3 décimales pour le poids). */
-export function decrementStock(products: Product[], lines: Pick<SaleLine, 'product_id' | 'quantity'>[]): Product[] {
+export function decrementStock<P extends Product>(products: P[], lines: Pick<SaleLine, 'product_id' | 'quantity'>[]): P[] {
   const sold = new Map<string, number>();
   for (const l of lines) sold.set(l.product_id, (sold.get(l.product_id) ?? 0) + l.quantity);
   return products.map((p) => {

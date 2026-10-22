@@ -3,6 +3,8 @@ import { setToken, setUnauthorizedHandler } from './api/client';
 import { Login } from './components/Login';
 import { PosScreen } from './components/PosScreen';
 import { StorePicker } from './components/StorePicker';
+import { db } from './db/db';
+import { ensureMigrated } from './db/migrate';
 import { clearSession, isSession, loadSession, saveSession, selectRegister } from './state/session';
 import type { Auth, Session } from './types';
 import './App.css';
@@ -10,18 +12,24 @@ import './App.css';
 // Session relue au chargement de la page (F5) : le client API doit connaître le token avant le premier appel.
 const restored = loadSession();
 setToken(restored?.token ?? null);
+void ensureMigrated(); // données des versions précédentes (localStorage) → IndexedDB
 
 export default function App() {
   const [session, setSession] = useState<Auth | Session | null>(restored);
   const [notice, setNotice] = useState<string | null>(null);
 
-  // Token refusé par l'API (expiré, ou fausse API relancée) : retour au login.
+  // Token refusé par l'API (expiré, ou fausse API relancée) : retour au login. Les ventes à envoyer restent
+  // dans l'outbox (rien n'est effacé à la déconnexion) et repartent dès la reconnexion.
   useEffect(() => {
     setUnauthorizedHandler(() => {
       clearSession();
       setToken(null);
       setSession(null);
       setNotice('Session expirée, reconnectez-vous.');
+      db.outbox.count().then((n) => {
+        if (n === 1) setNotice('Session expirée, reconnectez-vous : la vente gardée sur la caisse partira ensuite.');
+        if (n > 1) setNotice(`Session expirée, reconnectez-vous : les ${n} ventes gardées sur la caisse partiront ensuite.`);
+      }).catch(() => {});
     });
     return () => setUnauthorizedHandler(null);
   }, []);

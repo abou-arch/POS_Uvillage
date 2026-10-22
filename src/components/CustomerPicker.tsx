@@ -1,5 +1,5 @@
 import { useEffect, useId, useState, type KeyboardEvent } from 'react';
-import { api } from '../api/client';
+import { searchCustomers } from '../db/customers';
 import { prefillFrom, type CustomerForm } from '../state/customers';
 import type { Customer } from '../types';
 import { NewCustomerModal } from './NewCustomerModal';
@@ -25,7 +25,7 @@ export function CustomerPicker({ customer, onChange, onDone }: {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
-  const [found, setFound] = useState<{ q: string; list: Customer[]; failed: boolean } | null>(null);
+  const [found, setFound] = useState<{ q: string; list: Customer[]; offline: boolean } | null>(null);
   const [creating, setCreating] = useState<Partial<CustomerForm> | null>(null);
   const q = query.trim();
 
@@ -33,16 +33,18 @@ export function CustomerPicker({ customer, onChange, onDone }: {
     if (q.length < MIN_SEARCH) return;
     let current = true; // ignore la réponse d'une recherche dépassée par une frappe plus récente
     const timer = setTimeout(() => {
-      api.customers(q)
-        .then((list) => { if (current) setFound({ q, list: list.slice(0, MAX_SUGGESTIONS), failed: false }); })
-        .catch(() => { if (current) setFound({ q, list: [], failed: true }); });
+      // Sans réponse du serveur, la recherche porte sur les clients déjà vus sur cette caisse.
+      void searchCustomers(q).then(({ list, offline }) => {
+        if (current) setFound({ q, list: list.slice(0, MAX_SUGGESTIONS), offline });
+      });
     }, DEBOUNCE_MS);
     return () => { current = false; clearTimeout(timer); };
   }, [q]);
 
   const results = found && found.q === q && q.length >= MIN_SEARCH ? found : null;
-  const options: Option[] = results && !results.failed
-    ? [...results.list.map((c): Option => ({ kind: 'customer', customer: c })), { kind: 'create' }]
+  // Hors ligne, pas de création : le client doit exister sur le serveur avant d'être rattaché à une vente.
+  const options: Option[] = results
+    ? [...results.list.map((c): Option => ({ kind: 'customer', customer: c })), ...(results.offline ? [] : [{ kind: 'create' } as const])]
     : [];
   const activeIndex = Math.min(active, options.length - 1);
 
@@ -112,10 +114,9 @@ export function CustomerPicker({ customer, onChange, onDone }: {
             <li className="hint">Tapez au moins {MIN_SEARCH} caractères du nom, du matricule ou du téléphone.</li>
           ) : !results ? (
             <li className="hint">Recherche…</li>
-          ) : results.failed ? (
-            <li className="hint failed">Recherche impossible : serveur injoignable.</li>
           ) : (
             <>
+              {results.offline && <li className="hint failed">Hors ligne : clients déjà vus sur cette caisse seulement.</li>}
               {results.list.length === 0 && <li className="hint">Aucun client trouvé.</li>}
               {options.map((o, i) => (
                 <li key={o.kind === 'customer' ? o.customer.id : 'create'} id={`${listId}-${i}`} role="option"

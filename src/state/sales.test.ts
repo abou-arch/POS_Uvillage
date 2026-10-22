@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { ApiError } from '../api/client';
 import { buildSale } from '../lib/buildSale';
 import { saleTotals } from '../lib/totals.js';
 import { uuidv4 } from '../lib/uuid';
 import type { CartLine, Customer } from '../types';
 import { emptyCart, type CartState } from './cart';
-import { lastCounter, loadPending, saveCounter, savePending, sendSale } from './sales';
+import { lastCounter, loadPending, savePending } from './sales';
 
 function memoryStorage(initial: Record<string, string> = {}) {
   const data = new Map(Object.entries(initial));
@@ -22,23 +21,6 @@ const sale = buildSale({
   cart: { ...emptyCart, lines: [thon] }, storeId: 'st_2', registerId: 'reg_3', cashierId: 'u_2',
   payments: [{ method: 'cash', amount: 1000 }], amountReceived: 2000,
   id: '0f8b7c2e-5c1d-4c6e-9a4b-2f1e3d4c5b6a', counter: 1, now: new Date('2026-10-05T14:32:10Z'),
-});
-
-describe('envoi d’une vente', () => {
-  it('créée ou doublon : envoyée', async () => {
-    expect(await sendSale(sale, async () => ({ status: 'created' }))).toEqual({ status: 'sent' });
-    expect(await sendSale(sale, async () => ({ status: 'duplicate' }))).toEqual({ status: 'sent' });
-  });
-  it('pas de réseau, session expirée ou panne : reste à envoyer', async () => {
-    for (const failure of [new TypeError('Failed to fetch'), new ApiError(401, 'UNAUTHENTICATED', 'Connexion requise'),
-      new ApiError(503, 'UNAVAILABLE', 'Indisponible')]) {
-      expect(await sendSale(sale, async () => { throw failure; })).toEqual({ status: 'offline' });
-    }
-  });
-  it('refusée par le serveur : gardée avec le motif', async () => {
-    const refused = await sendSale(sale, async () => { throw new ApiError(422, 'TOTALS_MISMATCH', 'Totaux incohérents'); });
-    expect(refused).toEqual({ status: 'rejected', message: 'Totaux incohérents' });
-  });
 });
 
 describe('ventes gardées sur la caisse', () => {
@@ -123,7 +105,7 @@ describe('compteur de tickets', () => {
   it('part de 0 et reste propre à chaque caisse', () => {
     const storage = memoryStorage();
     expect(lastCounter('reg_3', storage)).toBe(0);
-    saveCounter('reg_3', 41, storage);
+    storage.setItem('pos.ticketCounter.reg_3', '41');
     expect(lastCounter('reg_3', storage)).toBe(41);
     expect(lastCounter('reg_1', storage)).toBe(0);
   });

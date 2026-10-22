@@ -1,5 +1,5 @@
-// Ventes à envoyer (dans localStorage, en attendant l'étape hors ligne) et compteur de tickets par caisse.
-import { ApiError } from '../api/client';
+// Vérification d'une vente relue (outbox, dernier ticket) et lecture de l'ancien emplacement localStorage
+// des ventes à envoyer et des compteurs de tickets, pour la migration vers IndexedDB (db/migrate.ts).
 import { browserStorage, isId, isRecord, readJson, readText, writeJson } from '../lib/storage';
 import type { Payment, PaymentMethod, Sale, SaleLine } from '../types';
 import { METHOD_LABELS } from './payment';
@@ -65,26 +65,4 @@ export const savePending = ({ sales, unreadable }: PendingQueue, storage = brows
 export function lastCounter(registerId: string, storage = browserStorage()): number {
   const n = readJson(counterKey(registerId), storage);
   return typeof n === 'number' && Number.isInteger(n) && n > 0 ? n : 0;
-}
-
-export const saveCounter = (registerId: string, n: number, storage = browserStorage()) =>
-  writeJson(counterKey(registerId), n, storage);
-
-export type SendResult = { status: 'sent' } | { status: 'offline' } | { status: 'rejected'; message: string };
-
-/**
- * Envoie une vente. Créée ou déjà reçue (doublon) : elle est envoyée.
- * Pas de réponse, session expirée (401) ou panne du serveur : elle reste à envoyer.
- * Refus (400, 422…) : elle reste aussi, marquée en erreur pour vérification.
- */
-export async function sendSale(sale: Sale, createSale: (s: Sale) => Promise<unknown>): Promise<SendResult> {
-  try {
-    await createSale(sale);
-    return { status: 'sent' };
-  } catch (err) {
-    if (err instanceof ApiError && err.status >= 400 && err.status < 500 && err.status !== 401) {
-      return { status: 'rejected', message: err.message };
-    }
-    return { status: 'offline' };
-  }
 }

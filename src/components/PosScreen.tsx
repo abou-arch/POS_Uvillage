@@ -1,41 +1,52 @@
-import { useEffect, useReducer, useState } from 'react';
-import { api, ApiError } from '../api/client';
+import { useEffect, useReducer, useRef, useState } from 'react';
 import { AUTO_PRINT, storeInfo, TIME_ZONE } from '../config/store';
-import { buildSale, decrementStock } from '../lib/buildSale';
+import { cachedProducts } from '../db/catalog';
+import { db } from '../db/db';
+import { legacyUnreadable } from '../db/migrate';
+import { recordSale } from '../db/outbox';
+import { useLiveQuery } from '../db/useLiveQuery';
+import { buildSale, type SaleInput } from '../lib/buildSale';
 import { buildReceipt } from '../lib/receipt';
 import { formatMad } from '../lib/totals.js';
 import { uuidv4 } from '../lib/uuid';
 import { cartReducer, emptyCart, type CartAction } from '../state/cart';
 import { holdCart, refreshFromCatalog } from '../state/held';
 import { loadLastReceipt, saveLastReceipt } from '../state/lastReceipt';
+import type { LastSale } from '../state/sales';
 import { useHeldSales } from '../state/useHeldSales';
-import { lastCounter, saveCounter, sendSale, type LastSale } from '../state/sales';
-import { usePendingSales } from '../state/usePendingSales';
-import type { Brand, Category, Payment, Product, Sale, Session } from '../types';
+import { useSync } from '../sync/useSync';
+import type { Payment, Sale, Session } from '../types';
 import { Cart } from './Cart';
 import { HeldListModal } from './HeldListModal';
 import { ProductGrid } from './ProductGrid';
+import { SyncStatus } from './SyncStatus';
 import { Ticket } from './Ticket';
 import { Avatar, Icon } from './ui';
 
+const plural = (n: number, one: string, many: string) => (n === 1 ? one : many.replace('{n}', String(n)));
+
 export function PosScreen({ session, onLogout }: { session: Session; onLogout: () => void }) {
-  const [products, setProducts] = useState<Product[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [brands, setBrands] = useState<Brand[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [cart, dispatch] = useReducer(cartReducer, emptyCart);
-  const [lastSale, setLastSale] = useState<LastSale | null>(null);
-  const [resending, setResending] = useState(false);
+  const [lastSale, setLastSale] = useState<Sale | null>(null);
   const [showHeld, setShowHeld] = useState(false);
   const [resumeNotice, setResumeNotice] = useState<string | null>(null);
-  const pending = usePendingSales();
   const held = useHeldSales(session.registerId);
+  const sync = useSync(session.storeId);
   const [receipt, setReceipt] = useState(() => loadLastReceipt(session.registerId));
   const [duplicate, setDuplicate] = useState(false);
   const [printRequest, setPrintRequest] = useState(0);
+  const [legacy] = useState(() => legacyUnreadable(session.registerId));
+  const checkingOut = useRef(false); // un double appui sur F4 ne crée pas deux ventes
+
+  // Le cache s'affiche tout de suite ; la synchro le met à jour en arrière-plan, et la grille suit.
+  const products = useLiveQuery(() => cachedProducts(session.storeId), [session.storeId], []);
+  const categories = useLiveQuery(() => db.categories.toArray(), [], []).value;
+  const brands = useLiveQuery(() => db.brands.toArray(), [], []).value;
 
   const store = session.stores.find((s) => s.id === session.storeId);
   const register = store?.registers.find((r) => r.id === session.registerId);
+  const rejected = sync.outbox.filter((e) => e.error !== null);
 
   // L'impression part après le rendu, pour que le ticket imprimé soit bien celui de la vente demandée.
   useEffect(() => {
@@ -47,21 +58,31 @@ export function PosScreen({ session, onLogout }: { session: Session; onLogout: (
     setPrintRequest((n) => n + 1);
   }
 
-  // Encaissement : la vente est d'abord gardée sur la caisse, puis envoyée. Elle ne peut donc plus se perdre.
+  // Encaissement : la vente est d'abord écrite dans l'outbox (avec son numéro de ticket), puis envoyée.
+  // Si la base locale refuse l'écriture, rien n'est encaissé et le panier reste là : aucune vente ne se perd.
   async function checkout(payments: Payment[], amountReceived: number) {
-    const counter = lastCounter(session.registerId) + 1;
-    let sale: Sale;
+    if (checkingOut.current) return;
+    const input: Omit<SaleInput, 'counter'> = {
+      cart, storeId: session.storeId, registerId: session.registerId, cashierId: session.user.id,
+      payments, amountReceived, id: uuidv4(), now: new Date(),
+    };
     try {
-      sale = buildSale({
-        cart, storeId: session.storeId, registerId: session.registerId, cashierId: session.user.id,
-        payments, amountReceived, id: uuidv4(), counter, now: new Date(),
-      });
+      buildSale({ ...input, counter: 1 }); // vérifie panier et paiements avant d'écrire quoi que ce soit
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Vente impossible.');
       return;
     }
-    saveCounter(session.registerId, counter);
-    pending.add(sale);
+    checkingOut.current = true;
+    let sale: Sale;
+    try {
+      sale = await recordSale((counter) => buildSale({ ...input, counter }), session.registerId);
+    } catch {
+      setError('Stockage local indisponible : la vente n’est pas enregistrée. Le panier est conservé, réessayez.');
+      return;
+    } finally {
+      checkingOut.current = false;
+    }
+    sync.sync();
     const ticket = { sale, cashier: session.user.name, customer: cart.customer?.name ?? null };
     saveLastReceipt(session.registerId, ticket);
     setReceipt(ticket);
@@ -70,40 +91,40 @@ export function PosScreen({ session, onLogout }: { session: Session; onLogout: (
     dispatch({ type: 'clear' });
     setError(null);
     setResumeNotice(null);
-    setProducts((list) => decrementStock(list, sale.lines));
-    setLastSale({ sale, status: 'sending' });
-    const result = await sendSale(sale, api.createSale);
-    if (result.status === 'sent') pending.remove(sale.id);
-    if (result.status === 'rejected') pending.reject(sale.id, result.message);
-    setLastSale((last) => (last?.sale.id === sale.id ? { sale, ...result } : last));
+    setLastSale(sale);
   }
 
-  // « Renvoyer » : les ventes gardées partent une par une ; l'API ignore celles qu'elle a déjà reçues.
-  async function resendPending() {
-    setResending(true);
-    for (const p of pending.list) {
-      const result = await sendSale(p.sale, api.createSale);
-      if (result.status === 'sent') pending.remove(p.sale.id);
-      else if (result.status === 'rejected') pending.reject(p.sale.id, result.message);
-      else break; // toujours pas de réseau : inutile d'insister
-    }
-    setResending(false);
+  // Ce que l'écran dit de la dernière vente vient de la synchro : reçue, refusée, ou encore sur la caisse.
+  function lastSaleView(sale: Sale): LastSale {
+    const outcome = sync.outcomes.get(sale.id);
+    if (outcome?.status === 'sent') return { sale, status: 'sent' };
+    const error = outcome?.status === 'rejected' ? outcome.error : sync.outbox.find((e) => e.id === sale.id)?.error;
+    if (error) return { sale, status: 'rejected', message: error };
+    return { sale, status: sync.connection === 'offline' ? 'offline' : 'sending' };
   }
 
-  // Mise en attente : le panier est gardé sur la caisse (jamais envoyé), puis vidé pour le client suivant.
+  // Mise en attente : le panier n'est vidé qu'une fois écrit sur la caisse.
   function hold(note: string) {
-    held.add(holdCart(cart, note, uuidv4(), new Date()));
-    dispatch({ type: 'clear' });
-    setResumeNotice(null);
+    held.add(holdCart(cart, note, uuidv4(), new Date()))
+      .then(() => {
+        dispatch({ type: 'clear' });
+        setResumeNotice(null);
+      })
+      .catch(() => setError('Mise en attente impossible : stockage local indisponible. Le panier est conservé.'));
   }
 
   // Reprise : prix et stock repris du catalogue actuel ; le caissier voit ce qui a changé.
-  function resume(id: string, holdCurrent: boolean) {
+  async function resume(id: string, holdCurrent: boolean) {
     const sale = held.list.find((h) => h.id === id);
     if (!sale) return;
-    if (holdCurrent && cart.lines.length > 0) held.add(holdCart(cart, '', uuidv4(), new Date()));
-    const { cart: refreshed, changes, missing, checked } = refreshFromCatalog(sale.cart, products);
-    held.remove(id);
+    try {
+      if (holdCurrent && cart.lines.length > 0) await held.add(holdCart(cart, '', uuidv4(), new Date()));
+      await held.remove(id);
+    } catch {
+      setError('Reprise impossible : stockage local indisponible.');
+      return;
+    }
+    const { cart: refreshed, changes, missing, checked } = refreshFromCatalog(sale.cart, products.value);
     setLastSale(null);
     dispatch({ type: 'restore', state: refreshed });
     setShowHeld(false);
@@ -124,13 +145,6 @@ export function PosScreen({ session, onLogout }: { session: Session; onLogout: (
     dispatch(action);
   }
 
-  useEffect(() => {
-    // Sprint hors ligne : lire d'abord le cache IndexedDB, puis rafraîchir avec updated_since.
-    Promise.all([api.products(session.storeId), api.categories(), api.brands()])
-      .then(([p, c, b]) => { setProducts(p); setCategories(c); setBrands(b); })
-      .catch((e) => setError(e instanceof ApiError ? e.message : 'Serveur injoignable : les articles ne sont pas chargés.'));
-  }, [session.storeId]);
-
   // Raccourci Ctrl+Shift+S : focus sur la recherche, comme dans le POS actuel.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -143,21 +157,17 @@ export function PosScreen({ session, onLogout }: { session: Session; onLogout: (
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  const unreadable = sync.outboxUnreadable + held.unreadable + legacy;
+
   return (
     <div className="pos">
       <header className="topbar">
         <span className="brand"><span className="logo"><Icon name="register" size={18} /></span>Caisse</span>
         <span className="where"><Icon name="store" size={16} />{store?.name}<span className="dot">·</span>{register?.name}</span>
-        {pending.list.length > 0 && (
-          <button className="pending-badge" onClick={resendPending} disabled={resending}
-            title="Ventes gardées sur la caisse, pas encore reçues par le serveur">
-            <Icon name="alert" size={16} />
-            {pending.list.length} vente{pending.list.length > 1 ? 's' : ''} à envoyer · {resending ? 'envoi…' : 'Renvoyer'}
-          </button>
-        )}
+        <SyncStatus connection={sync.connection} pending={sync.outbox.length} rejected={rejected.length} onSync={() => sync.sync(true)} />
         <span className="spacer" />
-        <button className="held-button" onClick={() => setShowHeld(true)}>
-          <Icon name="pause" size={18} />Liste d’attente<span className="count">{held.list.length}</span>
+        <button className="held-button" onClick={() => setShowHeld(true)} aria-label={`Liste d’attente : ${held.list.length}`}>
+          <Icon name="pause" size={18} /><span className="label">Liste d’attente</span><span className="count">{held.list.length}</span>
         </button>
         <button className="held-button" disabled={!receipt} onClick={reprint}
           aria-label="Réimprimer le dernier ticket" title={receipt ? `Réimprimer le ticket ${receipt.sale.number}` : 'Aucun ticket à réimprimer'}>
@@ -167,48 +177,46 @@ export function PosScreen({ session, onLogout }: { session: Session; onLogout: (
         <button className="btn ghost" onClick={onLogout}><Icon name="logout" size={18} />Déconnexion</button>
       </header>
       {error && <p className="banner"><Icon name="alert" size={18} />{error}</p>}
+      {products.loaded && products.value.length === 0 && sync.connection === 'offline' && (
+        <p className="banner"><Icon name="alert" size={18} />Catalogue vide sur ce poste : connectez la caisse au serveur une première fois.</p>
+      )}
       {resumeNotice && (
         <p className="banner notice" role="status">
           <Icon name="alert" size={18} />{resumeNotice}
           <button type="button" className="link" onClick={() => setResumeNotice(null)}>Compris</button>
         </p>
       )}
-      {!held.saved && (
+      {(sync.storageError || !held.saved) && (
         <p className="banner">
-          <Icon name="alert" size={18} />Stockage local indisponible : les ventes en attente seront perdues au rechargement.
+          <Icon name="alert" size={18} />Base locale indisponible : la caisse ne peut ni vendre hors ligne ni garder de vente en attente.
         </p>
       )}
-      {held.unreadable > 0 && (
+      {rejected.length > 0 && (
+        <p className="banner notice">
+          <Icon name="alert" size={18} />
+          {plural(rejected.length, 'Une vente a été refusée par le serveur', '{n} ventes ont été refusées par le serveur')}
+          {' '}: gardée{rejected.length > 1 ? 's' : ''} sur la caisse, à faire vérifier. Cliquez sur l’indicateur pour réessayer.
+        </p>
+      )}
+      {unreadable > 0 && (
         <p className="banner">
           <Icon name="alert" size={18} />
-          {held.unreadable === 1
-            ? 'Une vente en attente est illisible : elle reste sur ce poste, à faire vérifier.'
-            : `${held.unreadable} ventes en attente sont illisibles : elles restent sur ce poste, à faire vérifier.`}
-        </p>
-      )}
-      {!pending.saved && (
-        <p className="banner">
-          <Icon name="alert" size={18} />Stockage local indisponible : ne fermez pas la caisse avant l’envoi des ventes.
-        </p>
-      )}
-      {pending.unreadable > 0 && (
-        <p className="banner">
-          <Icon name="alert" size={18} />
-          {pending.unreadable === 1
-            ? 'Une vente gardée sur la caisse est illisible : elle reste sur ce poste, sans être envoyée, à faire vérifier.'
-            : `${pending.unreadable} ventes gardées sur la caisse sont illisibles : elles restent sur ce poste, sans être envoyées, à faire vérifier.`}
+          {plural(unreadable, 'Une vente gardée sur la caisse est illisible', '{n} ventes gardées sur la caisse sont illisibles')}
+          {' '}: rien n’est envoyé ni effacé, à faire vérifier.
         </p>
       )}
       <main>
-        <Cart cart={cart} dispatch={cartDispatch} products={products} lastSale={lastSale} onCheckout={checkout} onHold={hold} />
-        <ProductGrid products={products} categories={categories} brands={brands}
+        <Cart cart={cart} dispatch={cartDispatch} products={products.value} lastSale={lastSale && lastSaleView(lastSale)}
+          onCheckout={checkout} onHold={hold} />
+        <ProductGrid products={products.value} categories={categories} brands={brands}
           onAdd={(product) => {
             cartDispatch({ type: 'add', product });
             document.getElementById('scan')?.focus(); // la douchette reste prête après un clic sur une tuile
           }} />
       </main>
       {showHeld && (
-        <HeldListModal list={held.list} cartEmpty={cart.lines.length === 0} onResume={resume} onDelete={held.remove}
+        <HeldListModal list={held.list} cartEmpty={cart.lines.length === 0} onResume={resume}
+          onDelete={(id) => void held.remove(id).catch(() => setError('Suppression impossible : stockage local indisponible.'))}
           onClose={() => { setShowHeld(false); document.getElementById('scan')?.focus(); }} />
       )}
       {receipt && (
