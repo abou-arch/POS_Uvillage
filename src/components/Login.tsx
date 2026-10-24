@@ -4,8 +4,10 @@ import type { Auth } from '../types';
 import { Icon } from './ui';
 
 export function Login({ onLogin, notice }: { onLogin: (auth: Auth) => void; notice?: string | null }) {
-  const [username, setUsername] = useState('caissier');
-  const [password, setPassword] = useState('caissier');
+  // Compte de test de la fausse API prérempli en développement seulement : la version de production
+  // (npm run build) n'embarque aucun identifiant.
+  const [username, setUsername] = useState(import.meta.env.DEV ? 'caissier' : '');
+  const [password, setPassword] = useState(import.meta.env.DEV ? 'caissier' : '');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 

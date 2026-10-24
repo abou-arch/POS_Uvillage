@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { setToken, setUnauthorizedHandler } from './api/client';
+import { apiConfigError, setToken, setUnauthorizedHandler } from './api/client';
 import { Login } from './components/Login';
 import { PosScreen } from './components/PosScreen';
 import { StorePicker } from './components/StorePicker';
+import { forgetCustomers } from './db/customers';
 import { db } from './db/db';
 import { ensureMigrated } from './db/migrate';
 import { clearSession, isSession, loadSession, saveSession, selectRegister } from './state/session';
@@ -42,12 +43,30 @@ export default function App() {
     setSession(next);
   }
 
+  // Déconnexion volontaire (fin de service) : les clients consultés quittent le poste, qui est partagé.
+  // Les ventes à envoyer et en attente restent : elles appartiennent à la caisse, pas au caissier.
+  function logout() {
+    forgetCustomers();
+    update(null);
+  }
+
+  if (apiConfigError) {
+    return (
+      <div className="auth-screen">
+        <div className="card login" role="alert">
+          <h1>Caisse non configurée</h1>
+          <p className="alert">{apiConfigError}</p>
+          <p className="muted">Rien n’est envoyé au serveur tant que l’adresse n’est pas corrigée.</p>
+        </div>
+      </div>
+    );
+  }
   if (!session) {
     return <Login notice={notice} onLogin={(auth) => { setNotice(null); update(selectRegister(auth)); }} />;
   }
   if (!isSession(session)) {
-    return <StorePicker auth={session} onLogout={() => update(null)}
+    return <StorePicker auth={session} onLogout={logout}
       onSelect={(storeId, registerId) => update(selectRegister(session, storeId, registerId))} />;
   }
-  return <PosScreen key={session.registerId} session={session} onLogout={() => update(null)} />;
+  return <PosScreen key={session.registerId} session={session} onLogout={logout} />;
 }

@@ -116,5 +116,9 @@ app.post('/api/sales/:id/cancel', (req, res) => {
 
 app.get('/api/sales', (_req, res) => res.json([...sales.values()])); // pratique pour vérifier pendant le dev
 
+// Sur ce poste seulement : ses tokens se fabriquent à la main (tok.u_1.x = administrateur) et elle sert les clients
+// en clair. Ouverte au réseau (HOST=0.0.0.0, pour un essai sur tablette), n'importe qui sur le Wi-Fi y aurait accès.
+// Ne jamais la déployer.
 const PORT = process.env.PORT ?? 4000;
-app.listen(PORT, () => console.log(`Fausse API sur http://localhost:${PORT}/api`));
+const HOST = process.env.HOST ?? '127.0.0.1';
+app.listen(PORT, HOST, () => console.log(`Fausse API sur http://${HOST}:${PORT}/api`));

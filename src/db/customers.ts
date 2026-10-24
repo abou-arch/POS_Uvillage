@@ -31,3 +31,6 @@ export async function searchCustomers(search: string): Promise<{ list: Customer[
 }
 
 export const rememberCustomer = (c: Customer) => db.customers.put(c).catch(() => {});
+
+/** Vide le cache des clients (déconnexion) : il se reconstitue au fil des recherches du caissier suivant. */
+export const forgetCustomers = () => void db.customers.clear().catch(() => {});

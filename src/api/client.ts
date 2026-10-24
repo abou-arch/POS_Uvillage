@@ -4,6 +4,28 @@ import type { Auth, Brand, Category, Customer, Product, Sale } from '../types';
 const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:4000/api';
 const TIMEOUT_MS = 10_000; // la caisse ne doit pas rester bloquée quand le réseau ne répond plus
 
+const LOCAL_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
+
+/**
+ * En production, mot de passe et token ne circulent qu'en HTTPS : sur le Wi-Fi d'un magasin, du HTTP se lit
+ * en clair. Seule exception : une API sur le poste lui-même (essais avec la fausse API). Renvoie le problème, ou null.
+ */
+export function apiUrlProblem(base: string, production: boolean): string | null {
+  let url: URL;
+  try {
+    url = new URL(base);
+  } catch {
+    return `Adresse de l’API invalide (VITE_API_URL = « ${base} »).`;
+  }
+  if (production && url.protocol !== 'https:' && !LOCAL_HOSTS.includes(url.hostname)) {
+    return `Adresse de l’API non sécurisée (${url.origin}) : configurez une adresse en https dans VITE_API_URL.`;
+  }
+  return null;
+}
+
+/** Problème de configuration qui interdit tout appel à l'API (affiché à la place de la caisse). */
+export const apiConfigError = apiUrlProblem(BASE, import.meta.env.PROD);
+
 export class ApiError extends Error {
   status: number;
   code: string;
@@ -22,6 +44,8 @@ let onUnauthorized: (() => void) | null = null;
 export const setUnauthorizedHandler = (fn: (() => void) | null) => { onUnauthorized = fn; };
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  // Erreur simple (pas ApiError) : pour la synchro, c'est « pas de réseau », les ventes restent sur la caisse.
+  if (apiConfigError) throw new Error(apiConfigError);
   const sentToken = token;
   const res = await fetch(`${BASE}${path}`, {
     ...init,
@@ -48,7 +72,7 @@ export const api = {
   categories: () => request<Category[]>('/categories'),
   brands: () => request<Brand[]>('/brands'),
   products: (storeId: string, updatedSince?: string) =>
-    request<Product[]>(`/products?store_id=${storeId}${updatedSince ? `&updated_since=${encodeURIComponent(updatedSince)}` : ''}`),
+    request<Product[]>(`/products?store_id=${encodeURIComponent(storeId)}${updatedSince ? `&updated_since=${encodeURIComponent(updatedSince)}` : ''}`),
   customers: (search = '') => request<Customer[]>(`/customers?search=${encodeURIComponent(search)}`),
   createCustomer: (c: Omit<Customer, 'matricule'> & { matricule?: string | null }) =>
     request<Customer>('/customers', { method: 'POST', body: JSON.stringify(c) }),
