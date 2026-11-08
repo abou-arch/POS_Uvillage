@@ -1,0 +1,44 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mock-api",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "pos-caisse",
+        "run",
+        "mock"
+      ],
+      "port": 4000
+    },
+    {
+      "name": "caisse",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "pos-caisse",
+        "run",
+        "dev",
+        "--",
+        "--strictPort"
+      ],
+      "port": 5173
+    },
+    {
+      "name": "caisse-preview",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "pos-caisse",
+        "run",
+        "preview",
+        "--",
+        "--port",
+        "4173",
+        "--strictPort"
+      ],
+      "port": 4173
+    }
+  ]
+}
