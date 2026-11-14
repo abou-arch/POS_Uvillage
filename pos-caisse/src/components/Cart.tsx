@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type Dispatch, type FormEvent } from 'react';
 import { formatMad, lineTotals, saleTotals } from '../lib/totals.js';
 import { canSendSms, type CartAction, type CartState } from '../state/cart';
+import type { DiscountExcess } from '../state/permissions';
 import type { LastSale } from '../state/sales';
 import type { Payment, Product } from '../types';
 import { CashModal } from './CashModal';
@@ -15,13 +16,14 @@ interface Props {
   dispatch: Dispatch<CartAction>;
   products: Product[];
   lastSale: LastSale | null;
+  overLimit: DiscountExcess | null; // remises d'un caissier au-delà du plafond (§11) ; null : pas de plafond pour ce rôle
   onCheckout: (payments: Payment[], amountReceived: number) => void;
   onHold: (note: string) => void;
 }
 
 const formatQuantity = (q: number) => q.toLocaleString('fr-FR', { maximumFractionDigits: 3 });
 
-export function Cart({ cart, dispatch, products, lastSale, onCheckout, onHold }: Props) {
+export function Cart({ cart, dispatch, products, lastSale, overLimit, onCheckout, onHold }: Props) {
   const scanRef = useRef<HTMLInputElement>(null);
   const [notFound, setNotFound] = useState<string | null>(null);
   const [paying, setPaying] = useState<'cash' | 'multiple' | 'hold' | null>(null);
@@ -107,6 +109,9 @@ export function Cart({ cart, dispatch, products, lastSale, onCheckout, onHold }:
                       <span className={l.quantity > l.stock ? 'warn' : ''}>
                         {l.quantity > l.stock ? `Stock insuffisant : ${l.stock}` : `Stock : ${l.stock}`}
                       </span>
+                      {overLimit?.lines.includes(l.product_id) && (
+                        <span className="warn approval-needed"> · Remise au-delà du plafond : PIN responsable au paiement</span>
+                      )}
                     </div>
                   </td>
                   <td className="num col-price">{formatMad(l.unit_price_ttc)}</td>
@@ -154,6 +159,7 @@ export function Cart({ cart, dispatch, products, lastSale, onCheckout, onHold }:
                 onChange={(e) => dispatch({ type: 'setGlobalDiscount', amount: Number(e.target.value) * 100 })} />
               DH
             </span>
+            {overLimit?.global && <small className="warn approval-needed">Au-delà du plafond : PIN responsable au paiement</small>}
           </label>
           <label className="check">
             <input type="checkbox" checked={cart.sendSms} disabled={!canSendSms(cart)} onChange={() => dispatch({ type: 'toggleSms' })} />

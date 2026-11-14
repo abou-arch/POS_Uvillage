@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { Auth, Session, Store } from '../types';
 import {
-  autoSelection, clearSession, closingThreshold, initialStore, isAuth, isSession, loadSession, onlyRegister, saveSession, selectRegister, SESSION_KEY,
+  autoSelection, clearSession, closingThreshold, discountLimits, initialStore, isAuth, isSession, loadSession, onlyRegister, saveSession,
+  selectRegister, SESSION_KEY,
 } from './session';
 
-const centre: Store = { id: 'st_1', name: 'Magasin centre', closing_difference_threshold: 2000, registers: [{ id: 'reg_1', name: 'Caisse 1' }, { id: 'reg_2', name: 'Caisse 2' }] };
-const quartier: Store = { id: 'st_2', name: 'Magasin quartier', closing_difference_threshold: 2000, registers: [{ id: 'reg_3', name: 'Caisse 1' }] };
-const sansCaisse: Store = { id: 'st_3', name: 'Magasin vide', closing_difference_threshold: 0, registers: [] };
+const limits = { cashier_max_discount_percent: 10, cashier_max_discount: 5000 };
+const centre: Store = { id: 'st_1', name: 'Magasin centre', closing_difference_threshold: 2000, ...limits, registers: [{ id: 'reg_1', name: 'Caisse 1' }, { id: 'reg_2', name: 'Caisse 2' }] };
+const quartier: Store = { id: 'st_2', name: 'Magasin quartier', closing_difference_threshold: 2000, ...limits, registers: [{ id: 'reg_3', name: 'Caisse 1' }] };
+const sansCaisse: Store = { id: 'st_3', name: 'Magasin vide', closing_difference_threshold: 0, ...limits, registers: [] };
 const auth = (...stores: Store[]): Auth => ({ token: 'tok_1', user: { id: 'u_1', name: 'Falcon', role: 'admin' }, stores });
 
 // localStorage en mémoire : pas de navigateur sous Vitest.
@@ -108,5 +110,26 @@ describe('seuil d’écart de clôture (§2)', () => {
     expect(isSession(session) && closingThreshold(session)).toBe(5000);
     expect(isAuth(auth(centre))).toBe(true);
     expect(isAuth({ ...auth(centre), stores: [{ id: 'st_1', name: 'Magasin centre', registers: [] }] })).toBe(false);
+  });
+});
+
+describe('plafond de remise d’un caissier (§2, contrat 0.6)', () => {
+  it('lu dans la réponse du login, pour le magasin choisi ; null = pas de plafond de ce type', () => {
+    const session = selectRegister(auth(centre, { ...quartier, cashier_max_discount_percent: 15, cashier_max_discount: null }), 'st_2', 'reg_3');
+    expect(isSession(session) && discountLimits(session)).toEqual({ percent: 15, amount: null });
+    const centreSession = selectRegister(auth(centre), 'st_1', 'reg_1');
+    expect(isSession(centreSession) && discountLimits(centreSession)).toEqual({ percent: 10, amount: 5000 });
+  });
+  it('connexion enregistrée avant la mise à jour (sans plafond) ou plafond aberrant : il faut se reconnecter', () => {
+    const { cashier_max_discount_percent: _p, cashier_max_discount: _a, ...old } = centre;
+    expect(isAuth(auth(old as Store))).toBe(false);
+    expect(isAuth(auth({ ...centre, cashier_max_discount_percent: 120 }))).toBe(false);
+    expect(isAuth(auth({ ...centre, cashier_max_discount_percent: 12.5 }))).toBe(false);
+    expect(isAuth(auth({ ...centre, cashier_max_discount: -1 }))).toBe(false);
+    expect(isAuth(auth({ ...centre, cashier_max_discount_percent: null, cashier_max_discount: null }))).toBe(true);
+  });
+  it('magasin introuvable : aucune remise sans autorisation', () => {
+    const session = { ...auth(centre), storeId: 'st_9', registerId: 'reg_1' };
+    expect(discountLimits(session)).toEqual({ percent: 0, amount: 0 });
   });
 });

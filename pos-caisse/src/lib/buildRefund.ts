@@ -1,7 +1,7 @@
 // Retours et remboursements (§10 du contrat) : ce qui reste à retourner, les contrôles, les remboursements proposés
 // et le document envoyé à l'API. Fonctions pures : tout est testé. Montants : règle du §7, dans totals.js.
 import { isRecord } from './storage';
-import { isCents, isDate, isPayment, isQuantity, isRate, isUuid } from '../state/sales';
+import { isApproval, isCents, isDate, isPayment, isQuantity, isRate, isUuid } from '../state/sales';
 import { METHOD_LABELS } from '../state/payment';
 import type { Payment, PaymentMethod, Refund, RefundLine, RefundReason, Sale, SaleLine } from '../types';
 import { ticketNumber } from './buildSale';
@@ -171,6 +171,7 @@ export interface RefundInput {
   registerId: string;
   sessionId: string;
   cashierId: string;
+  approvedBy?: string | null; // responsable qui a autorisé le retour d'un caissier (§11)
   id: string; // UUID v4 généré par la caisse
   counter: number; // compteur des retours de cette caisse
   now: Date;
@@ -200,6 +201,7 @@ export function buildRefund(input: RefundInput): Refund {
     session_id: input.sessionId,
     original_sale_id: sale.id,
     cashier_id: input.cashierId,
+    approved_by: input.approvedBy ?? null,
     customer_id: sale.customer_id, // le client de la vente d'origine (§10)
     created_at: input.now.toISOString().replace(/\.\d{3}Z$/, 'Z'),
     reason: input.reason as RefundReason,
@@ -223,7 +225,7 @@ const isRefundLine = (v: unknown): v is RefundLine =>
 export const isRefund = (v: unknown): v is Refund =>
   isRecord(v) && isUuid(v.id) && typeof v.number === 'string' && v.number.startsWith('R-')
   && [v.store_id, v.register_id, v.cashier_id].every((x) => typeof x === 'string' && x !== '')
-  && isUuid(v.session_id) && isUuid(v.original_sale_id)
+  && isUuid(v.session_id) && isUuid(v.original_sale_id) && isApproval(v.approved_by)
   && (v.customer_id === null || (typeof v.customer_id === 'string' && v.customer_id !== ''))
   && isDate(v.created_at) && isReason(v.reason)
   && (v.reason_text === null || (typeof v.reason_text === 'string' && v.reason_text.length <= MAX_REASON_LENGTH))

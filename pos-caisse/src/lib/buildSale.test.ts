@@ -67,6 +67,11 @@ describe('construction de la vente (§5 du contrat)', () => {
   it('refuse une vente hors session de caisse (§9)', () => {
     expect(() => buildSale({ ...input({ lines: [thon] }, [cash(1000)], 1000), sessionId: '' })).toThrow('Aucune session de caisse ouverte.');
   });
+  it('remise au-delà du plafond autorisée par un responsable : approved_by (§11, contrat 0.6)', () => {
+    const remise = { ...thon, discount: 300 }; // 30 %
+    expect(buildSale(input({ lines: [remise] }, [cash(700)], 700)).approved_by).toBeNull();
+    expect(buildSale({ ...input({ lines: [remise] }, [cash(700)], 700), approvedBy: 'u_3' }).approved_by).toBe('u_3');
+  });
 });
 
 describe('numéro de ticket', () => {

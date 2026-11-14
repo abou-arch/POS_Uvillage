@@ -75,7 +75,7 @@ export async function recordRefund(
   saleId: string,
   build: (counter: number, local: Refund[]) => Refund,
   registerId: string,
-  names: { saleNumber: string; cashier: string; customer: string | null },
+  names: { saleNumber: string; cashier: string; customer: string | null; approver?: string | null },
 ): Promise<Refund> {
   await ensureMigrated();
   return db.transaction('rw', [db.meta, db.outbox, db.products, db.refunds, db.cash_sessions], async () => {
@@ -87,7 +87,7 @@ export async function recordRefund(
     await enqueue({ kind: 'refund', id: refund.id, refund });
     await db.refunds.add({
       id: refund.id, session_id: refund.session_id, register_id: registerId, original_sale_id: saleId, refund,
-      sale_number: names.saleNumber, cashier: names.cashier, customer: names.customer,
+      sale_number: names.saleNumber, cashier: names.cashier, customer: names.customer, approver: names.approver ?? null,
     });
     await db.meta.put({ key: refundCounterKey(registerId), value: counter });
     const cached = await db.products.bulkGet(refund.lines.map((l): [string, string] => [refund.store_id, l.product_id]));

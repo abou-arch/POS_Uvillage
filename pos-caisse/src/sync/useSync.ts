@@ -2,6 +2,7 @@
 // revient, toutes les 30 s (moins souvent après des échecs), après chaque opération et sur clic de l'indicateur.
 // Elle tourne tant qu'une caisse est choisie, session ouverte ou non : la clôture part aussi depuis l'écran d'ouverture.
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { syncApprovers } from '../db/approvers';
 import { syncCatalog } from '../db/catalog';
 import { db } from '../db/db';
 import { ensureMigrated } from '../db/migrate';
@@ -44,6 +45,8 @@ export function useSync(storeId: string) {
           return flush.status === 'unauthorized' ? 'unauthorized' : 'offline';
         }
         await syncCatalog(storeId);
+        // Responsables et empreinte de leur PIN (§11) : en cas d'échec, la liste gardée sur la caisse reste valable.
+        await syncApprovers(storeId).catch(() => {});
       } catch {
         setConnection('offline'); // API injoignable pour le catalogue, ou base locale indisponible
         return 'offline';

@@ -1,5 +1,6 @@
 // Fausse API conforme à docs/API_CONTRACT.md — à remplacer par la vraie API de l'équipe web.
 // Lancement : npm run mock  (http://localhost:4000/api)
+import { pbkdf2Sync, randomBytes } from 'node:crypto';
 import express from 'express';
 import cors from 'cors';
 import { users, stores, categories, brands, products, customers, sales, cashSessions, cashMovements, refunds } from './data.js';
@@ -28,6 +29,26 @@ const isDate = (v) => typeof v === 'string' && !Number.isNaN(Date.parse(v));
 const isId = (v) => typeof v === 'string' && v.length > 0;
 const isText = (v) => typeof v === 'string' && v.trim() !== '' && v.length <= 200;
 const isNote = (v) => v === null || v === undefined || isText(v);
+const isApproval = (v) => v === undefined || v === null || isId(v); // approved_by (§11) ; absent avant le contrat 0.6
+
+// --- Autorisation d'un responsable (§11) ------------------------------------------------------------------
+
+// Empreinte PBKDF2-SHA256 du PIN de chaque responsable, calculée au démarrage avec un sel aléatoire.
+const PIN_ITERATIONS = 600_000;
+const pinHashes = new Map(users.filter((u) => u.pin && ['manager', 'admin'].includes(u.role)).map((u) => {
+  const salt = randomBytes(16);
+  const hash = pbkdf2Sync(u.pin, salt, PIN_ITERATIONS, 32, 'sha256');
+  return [u.id, { algorithm: 'PBKDF2-SHA256', iterations: PIN_ITERATIONS, salt: salt.toString('base64'), hash: hash.toString('base64') }];
+}));
+
+/** approved_by qui n'est pas un responsable du magasin : l'opération est acceptée (elle a eu lieu) et signalée (§11). */
+function approvalWarning(approvedBy, storeId) {
+  if (approvedBy === undefined || approvedBy === null) return false;
+  const user = users.find((u) => u.id === approvedBy);
+  const ok = user && ['manager', 'admin'].includes(user.role) && user.store_ids.includes(storeId);
+  if (!ok) console.warn(`Autorisation à vérifier au back-office : ${approvedBy} n'est pas responsable du magasin ${storeId}`);
+  return !ok;
+}
 
 // Latence simulée pour tester les états de chargement.
 app.use((_req, _res, next) => setTimeout(next, 150));
@@ -63,6 +84,14 @@ app.get('/api/products', (req, res) => {
   res.json(list);
 });
 
+app.get('/api/stores/:id/approvers', (req, res) => {
+  if (!req.user.store_ids.includes(req.params.id)) return err(res, 403, 'FORBIDDEN', 'Magasin non autorisé');
+  const approvers = users
+    .filter((u) => ['manager', 'admin'].includes(u.role) && u.store_ids.includes(req.params.id) && pinHashes.has(u.id))
+    .map((u) => ({ user_id: u.id, name: u.name, pin: pinHashes.get(u.id) }));
+  res.json({ approvers });
+});
+
 app.get('/api/customers', (req, res) => {
   const q = String(req.query.search ?? '').toLowerCase();
   res.json(customers.filter((c) => !q || c.name.toLowerCase().includes(q) || c.phone?.includes(q) || c.matricule?.includes(q)));
@@ -92,6 +121,7 @@ function sessionOf(doc) {
 function createSale(sale) {
   const known = sales.get(sale.id);
   if (known) return { status: 200, body: { id: sale.id, status: 'duplicate', stock_warning: false, session_closed: known.session_closed ?? false } };
+  if (!isApproval(sale.approved_by)) return { status: 400, body: error('INVALID_DATA', 'approved_by invalide') };
   // §5 : une session déjà clôturée n'empêche pas d'enregistrer la vente : elle a eu lieu.
   const { session, ...refused } = sessionOf(sale);
   if (!session) return refused;
@@ -115,7 +145,8 @@ function createSale(sale) {
     product.updated_at = new Date().toISOString();
     if (product.stock_by_store[sale.store_id] < 0) stock_warning = true;
   }
-  sales.set(sale.id, { ...sale, session_closed, received_at: new Date().toISOString() });
+  const approval_warning = approvalWarning(sale.approved_by, sale.store_id);
+  sales.set(sale.id, { ...sale, session_closed, approval_warning, received_at: new Date().toISOString() });
   return { status: 201, body: { id: sale.id, status: 'created', stock_warning, session_closed } };
 }
 
@@ -155,7 +186,7 @@ app.get('/api/sales', (_req, res) => res.json([...sales.values()])); // pratique
 
 // --- Retours (§5, §10) ------------------------------------------------------------------------------------
 
-const withoutMeta = ({ session_closed: _c, received_at: _r, ...doc }) => doc; // champs internes de la fausse API
+const withoutMeta = ({ session_closed: _c, received_at: _r, approval_warning: _a, ...doc }) => doc; // champs internes de la fausse API
 const refundsOf = (saleId) => [...refunds.values()].filter((r) => r.original_sale_id === saleId);
 
 app.get('/api/sales/by-number/:number', (req, res) => {
@@ -178,7 +209,8 @@ const creditOf = (payments) => sumOf(payments.filter((p) => p.method === 'credit
 
 function validRefund(b) {
   return UUID.test(b.id ?? '') && isId(b.number) && isId(b.store_id) && isId(b.register_id) && isId(b.session_id)
-    && isId(b.original_sale_id) && isId(b.cashier_id) && (b.customer_id === null || isId(b.customer_id)) && isDate(b.created_at)
+    && isId(b.original_sale_id) && isId(b.cashier_id) && isApproval(b.approved_by)
+    && (b.customer_id === null || isId(b.customer_id)) && isDate(b.created_at)
     && REASONS.includes(b.reason) && isNote(b.reason_text) && (b.reason !== 'other' || isText(b.reason_text))
     && Array.isArray(b.lines) && b.lines.length > 0
     && b.lines.every((l) => l && Number.isInteger(l.line_index) && l.line_index >= 0 && isQuantity(l.quantity)
@@ -233,7 +265,8 @@ app.post('/api/refunds', (req, res) => {
     product.updated_at = new Date().toISOString();
   }
   const session_closed = session.status === 'closed';
-  refunds.set(b.id, { ...b, session_closed, received_at: new Date().toISOString() });
+  const approval_warning = approvalWarning(b.approved_by, b.store_id);
+  refunds.set(b.id, { ...b, session_closed, approval_warning, received_at: new Date().toISOString() });
   save();
   res.status(201).json({ id: b.id, status: 'created', session_closed });
 });
@@ -241,8 +274,8 @@ app.post('/api/refunds', (req, res) => {
 // --- Sessions de caisse (§9) ------------------------------------------------------------------------------
 
 const SESSION_FIELDS = ['id', 'store_id', 'register_id', 'status', 'opened_by', 'opened_at', 'opening_cash', 'opening_note',
-  'closed_by', 'closed_at', 'counts', 'cash_count', 'closing_note'];
-const publicSession = (s) => Object.fromEntries(SESSION_FIELDS.map((k) => [k, s[k]]));
+  'closed_by', 'approved_by', 'closed_at', 'counts', 'cash_count', 'closing_note'];
+const publicSession = (s) => Object.fromEntries(SESSION_FIELDS.map((k) => [k, s[k] ?? null]));
 
 const COUNTED_METHODS = ['cash', 'card', 'mobile']; // le crédit n'est pas de l'argent reçu
 
@@ -307,7 +340,7 @@ app.post('/api/cash-movements', (req, res) => {
   const known = cashMovements.get(b.id);
   if (known) return res.json({ id: b.id, status: 'duplicate', session_closed: known.session_closed });
   if (!UUID.test(b.id ?? '') || !isId(b.session_id) || !['in', 'out'].includes(b.type) || !isInt(b.amount, 1) || !isText(b.reason)
-    || !isId(b.created_by) || !isDate(b.created_at)) {
+    || !isId(b.created_by) || !isApproval(b.approved_by) || !isDate(b.created_at)) {
     return err(res, 400, 'INVALID_DATA', 'Mouvement d’espèces invalide');
   }
   const session = cashSessions.get(b.session_id);
@@ -315,7 +348,8 @@ app.post('/api/cash-movements', (req, res) => {
   const session_closed = session.status === 'closed';
   cashMovements.set(b.id, {
     id: b.id, session_id: b.session_id, type: b.type, amount: b.amount, reason: b.reason, created_by: b.created_by,
-    created_at: b.created_at, session_closed, received_at: new Date().toISOString(),
+    approved_by: b.approved_by ?? null, created_at: b.created_at, session_closed,
+    approval_warning: approvalWarning(b.approved_by, session.store_id), received_at: new Date().toISOString(),
   });
   save();
   res.status(201).json({ id: b.id, status: 'created', session_closed });
@@ -326,7 +360,8 @@ app.post('/api/cash-sessions/:id/close', (req, res) => {
   if (!session) return err(res, 404, 'NOT_FOUND', 'Session de caisse introuvable');
   if (session.status === 'closed') return res.json({ id: session.id, status: 'duplicate', expected_mismatch: session.expected_mismatch });
   const b = req.body ?? {};
-  if (!isId(b.closed_by) || !isDate(b.closed_at) || !validCounts(b.counts) || !validCashCount(b.cash_count) || !isNote(b.closing_note)) {
+  if (!isId(b.closed_by) || !isApproval(b.approved_by) || !isDate(b.closed_at) || !validCounts(b.counts) || !validCashCount(b.cash_count)
+    || !isNote(b.closing_note)) {
     return err(res, 400, 'INVALID_DATA', 'Clôture invalide');
   }
   if (b.counts.some((c) => c.difference !== c.counted - c.expected)) return err(res, 422, 'DIFFERENCE_MISMATCH', 'Écart incohérent');
@@ -338,12 +373,13 @@ app.post('/api/cash-sessions/:id/close', (req, res) => {
     return err(res, 422, 'CLOSING_NOTE_REQUIRED', 'Note obligatoire quand il y a un écart');
   }
   // La clôture a eu lieu : elle est acceptée même si l'API n'arrive pas aux mêmes attendus, et signalée.
-  // Le seuil d'écart n'est pas recontrôlé ici : la caisse l'a appliqué au moment de la clôture (§9).
+  // Le seuil d'écart n'est pas recontrôlé ici : la caisse l'a appliqué au moment de la clôture (§9, §11).
   const recomputed = expectedByMethod(session);
   const expected_mismatch = b.counts.some((c) => c.expected !== recomputed[c.method]);
   Object.assign(session, {
-    status: 'closed', closed_by: b.closed_by, closed_at: b.closed_at, counts: b.counts, cash_count: b.cash_count ?? null,
-    closing_note: b.closing_note ?? null, expected_mismatch, api_expected: recomputed,
+    status: 'closed', closed_by: b.closed_by, approved_by: b.approved_by ?? null, closed_at: b.closed_at, counts: b.counts,
+    cash_count: b.cash_count ?? null, closing_note: b.closing_note ?? null, expected_mismatch, api_expected: recomputed,
+    approval_warning: approvalWarning(b.approved_by, session.store_id),
   });
   save();
   res.json({ id: session.id, status: 'closed', expected_mismatch });

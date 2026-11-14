@@ -27,6 +27,8 @@ export const isCents = (v: unknown): v is number => typeof v === 'number' && Num
 export const isRate = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 100; // en %
 export const isQuantity = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0; // décimale au poids
 export const isDate = (v: unknown): v is string => typeof v === 'string' && ISO_UTC.test(v) && !Number.isNaN(Date.parse(v));
+/** approved_by (§11) : un id, ou null ; absent des opérations d'avant le contrat 0.6. */
+export const isApproval = (v: unknown) => v === undefined || v === null || isId(v);
 const isMethod = (v: unknown): v is PaymentMethod => typeof v === 'string' && Object.hasOwn(METHOD_LABELS, v);
 export const isPayment = (v: unknown): v is Payment => isRecord(v) && isMethod(v.method) && isCents(v.amount);
 const isLine = (v: unknown): v is SaleLine =>
@@ -35,7 +37,7 @@ const isLine = (v: unknown): v is SaleLine =>
   && isCents(v.total_ht) && isCents(v.total_tva) && isCents(v.total_ttc);
 export const isSale = (v: unknown): v is Sale =>
   isRecord(v) && isUuid(v.id) && isId(v.number)
-  && isId(v.store_id) && isId(v.register_id) && isUuid(v.session_id) && isId(v.cashier_id)
+  && isId(v.store_id) && isId(v.register_id) && isUuid(v.session_id) && isId(v.cashier_id) && isApproval(v.approved_by)
   && (v.customer_id === null || isId(v.customer_id))
   && isDate(v.created_at) && Array.isArray(v.lines) && v.lines.length > 0 && v.lines.every(isLine) && distinctLineIds(v.lines)
   && isCents(v.other_charges) && isCents(v.global_discount)

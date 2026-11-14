@@ -7,7 +7,7 @@ import {
   buildClosing, buildMovement, buildOpening, cashOfSale, closeBlocker, closedSession, closingError, countedError, countTotal,
   denominationLabel, expectedByMethod, expectedCash, isClosing, isLocalMovement, isLocalSession, MAX_COUNTED, MAX_MOVEMENT, MAX_OPENING_CASH,
   MAX_PIECES, methodCounts, movementAmountError, movementError, openedSession, openingError, parseCashCount, sessionReport,
-  sessionsToPrune, type Counted, type LocalCashSession,
+  sessionsToPrune, thresholdError, type Counted, type LocalCashSession,
 } from './cashSession';
 
 const SESSION = '3b9d6c1e-8f2a-4d5b-9c7e-1a2b3c4d5e6f';
@@ -213,15 +213,26 @@ describe('saisies du caissier', () => {
     expect(methodCounts(EXPECTED, counted(56000, null))).toBeNull();
   });
 
-  it('seuil d’écart de 20 DH : un caissier ne valide pas au-delà ; manager et admin si', () => {
-    const over = { counted: counted(54000), note: 'Billet manquant' }; // −30 DH
-    expect(closingError(closingInput(over))).toMatch(/Écart de plus de 20,00 DH \(espèces\) : faites valider la clôture par un responsable/);
-    expect(closingError(closingInput({ ...over, role: 'manager' }))).toBeNull();
-    expect(closingError(closingInput({ ...over, role: 'admin' }))).toBeNull();
-    expect(closingError(closingInput({ counted: counted(55000) }))).toBeNull(); // −20 DH : pile le seuil, autorisé
-    expect(closingError(closingInput({ counted: counted(59500) }))).toMatch(/responsable/); // +25 DH : un excédent aussi
-    expect(closingError(closingInput({ counted: counted(57000, 5000), note: 'Terminal' }))).toMatch(/\(carte\)/);
-    expect(closingError(closingInput({ counted: counted(56000), threshold: 0 }))).toMatch(/responsable/); // seuil 0 : tout écart
+  it('seuil d’écart de 20 DH : au-delà, un caissier fait autoriser par un responsable ; manager et admin non', () => {
+    const over = (cash: number, card = 8000) => methodCounts(EXPECTED, counted(cash, card)) ?? [];
+    expect(thresholdError(over(54000), 2000, 'cashier')) // −30 DH
+      .toBe('Écart de plus de 20,00 DH (espèces) : un responsable doit autoriser la clôture.');
+    expect(thresholdError(over(54000), 2000, 'manager')).toBeNull();
+    expect(thresholdError(over(54000), 2000, 'admin')).toBeNull();
+    expect(thresholdError(over(55000), 2000, 'cashier')).toBeNull(); // −20 DH : pile le seuil, permis
+    expect(thresholdError(over(59500), 2000, 'cashier')).toMatch(/responsable/); // +25 DH : un excédent aussi
+    expect(thresholdError(over(57000, 5000), 2000, 'cashier')).toMatch(/\(carte\)/);
+    expect(thresholdError(over(56000), 0, 'cashier')).toMatch(/responsable/); // seuil 0 : tout écart
+    expect(thresholdError(over(54000), 2000, 'cashier', 'u_3')).toBeNull(); // autorisé par le responsable u_3
+    // La saisie elle-même reste valable : le seuil ne bloque plus la fenêtre, l'autorisation se demande à la confirmation.
+    expect(closingError(closingInput({ counted: counted(54000), note: 'Billet manquant' }))).toBeNull();
+  });
+
+  it('clôture d’un caissier au-delà du seuil : refusée sans autorisation, enregistrée avec approved_by', () => {
+    const over = { counted: counted(54000), note: 'Billet manquant' };
+    expect(() => buildClosing(closingInput(over))).toThrow(/un responsable doit autoriser/);
+    expect(buildClosing(closingInput({ ...over, approvedBy: 'u_3' })).approved_by).toBe('u_3');
+    expect(buildClosing(closingInput({ ...over, role: 'manager', closedBy: 'u_3' })).approved_by).toBeNull();
   });
 
   it('le détail des billets et pièces doit donner les espèces comptées', () => {
@@ -254,15 +265,26 @@ describe('ce qui est envoyé à l’API (§9)', () => {
     const m = buildMovement({ id: 'a1c2e3f4-0000-4000-8000-000000000001', sessionId: SESSION, type: 'out', amount: 5000,
       reason: ' Achat  de sacs ', createdBy: 'u_2', available: 57000, now });
     expect(m).toEqual({ id: 'a1c2e3f4-0000-4000-8000-000000000001', session_id: SESSION, type: 'out', amount: 5000,
-      reason: 'Achat de sacs', created_by: 'u_2', created_at: '2026-11-12T08:02:00Z' });
+      reason: 'Achat de sacs', created_by: 'u_2', approved_by: null, created_at: '2026-11-12T08:02:00Z' });
     expect(() => buildMovement({ id: 'x', sessionId: SESSION, type: 'out', amount: 5000, reason: '', createdBy: 'u_2', available: 57000, now }))
       .toThrow('Le motif est obligatoire.');
+  });
+
+  it('sortie autorisée par un responsable (§11) : approved_by envoyé, nom gardé pour le ticket ; relue telle quelle', () => {
+    const m = buildMovement({ id: 'a1c2e3f4-0000-4000-8000-000000000002', sessionId: SESSION, type: 'out', amount: 5000,
+      reason: 'Dépôt banque', createdBy: 'u_2', approvedBy: 'u_3', available: 57000, now });
+    expect(m.approved_by).toBe('u_3');
+    expect(isLocalMovement({ ...m, cashier_name: 'Caissier 1', approver_name: 'Responsable' })).toBe(true);
+    const { approved_by: _a, ...before06 } = m; // mouvement enregistré avant le contrat 0.6
+    expect(isLocalMovement({ ...before06, cashier_name: 'Caissier 1' })).toBe(true);
+    expect(isLocalMovement({ ...m, approved_by: '', cashier_name: 'Caissier 1' })).toBe(false);
+    expect(isLocalMovement({ ...m, cashier_name: 'Caissier 1', approver_name: 3 })).toBe(false);
   });
 
   it('clôture du critère : espèces comptées 560, attendues 570 → écart −10 DH, avec la note ; carte 80 = 80', () => {
     const cashCount = [{ value: 20000, quantity: 2 }, { value: 10000, quantity: 1 }, { value: 5000, quantity: 1 }, { value: 1000, quantity: 1 }];
     expect(buildClosing(closingInput({ cashCount }))).toEqual({
-      closed_by: 'u_2', closed_at: '2026-11-12T08:02:00Z',
+      closed_by: 'u_2', approved_by: null, closed_at: '2026-11-12T08:02:00Z',
       counts: [
         { method: 'cash', expected: 57000, counted: 56000, difference: -1000 },
         { method: 'card', expected: 8000, counted: 8000, difference: 0 },
@@ -297,6 +319,14 @@ describe('ce qui est envoyé à l’API (§9)', () => {
     expect(isLocalSession({ ...open, counts: [] })).toBe(false); // ouverte mais à moitié clôturée
     expect(isLocalSession({ ...open, opening_cash: -1 })).toBe(false);
     expect(isLocalSession({ ...open, id: 'pas-un-uuid' })).toBe(false);
+    // Contrat 0.6 : la clôture autorisée garde l'id et le nom du responsable ; une session d'avant n'a ni l'un ni l'autre.
+    const approved = closedSession(open, buildClosing(closingInput({ counted: counted(54000), approvedBy: 'u_3' })), 'Caissier 1', 'Responsable');
+    expect(approved).toMatchObject({ approved_by: 'u_3', approved_by_name: 'Responsable' });
+    expect(isLocalSession(approved)).toBe(true);
+    const { approved_by: _a, approved_by_name: _n, ...before06 } = closed;
+    expect(isLocalSession(before06)).toBe(true);
+    expect(isLocalSession({ ...open, approved_by: 'u_3' })).toBe(false); // ouverte mais déjà autorisée : abîmée
+    expect(isLocalSession({ ...approved, approved_by_name: 5 })).toBe(false);
   });
 
   it('mouvement gardé sur la caisse : relu, ou refusé s’il est abîmé', () => {

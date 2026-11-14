@@ -321,6 +321,14 @@ label small { color:var(--muted); font-weight:400; }
 .segmented.four button { text-align:center; font-weight:600; }
 .t-title { margin:2px 0; font-size:15px; font-weight:700; }
 
+/* Autorisation d'un responsable (§11) : l'opération, le responsable, son PIN */
+.modal.approval { width:min(420px, calc(100vw - 32px)); }
+.approval-action { display:grid; gap:2px; margin:0; padding:10px 12px; background:#f3f6f9; border-radius:8px; }
+.approval-action span { color:var(--muted); font-size:13px; }
+.modal.approval select { height:44px; }
+.modal input.pin { font-size:22px; letter-spacing:.4em; text-align:center; }
+.adjust .approval-needed { color:var(--red); font-size:12px; font-weight:600; }
+
 /* Écrans plus étroits */
 @media (max-width: 1400px) {
   .topbar { gap:10px; } .topbar .who .label { display:none; } /* l'initiale suffit, le nom reste en infobulle */

@@ -228,6 +228,11 @@ describe('rapport de session 80 mm', () => {
     expect(z.title).toBe('RAPPORT DE CLÔTURE');
     expect(z.subtitle).toBeNull();
     expect(z.info.slice(3)).toEqual([{ label: 'Clôture', value: '12/11/2026 20:30' }, { label: 'Clôturée par', value: 'Falcon' }]);
+    // Clôture d'un caissier au-delà du seuil, autorisée par un responsable (§11) : son nom sur le rapport.
+    const approved = closedSession(open, { ...closing, approved_by: 'u_3' }, 'Caissier 1', 'Responsable');
+    expect(buildSessionReceipt({ ...base, session: approved, printedAt: new Date('2026-11-12T20:30:05Z') }).info.slice(3)).toEqual([
+      { label: 'Clôture', value: '12/11/2026 20:30' }, { label: 'Clôturée par', value: 'Caissier 1' }, { label: 'Autorisée par', value: 'Responsable' },
+    ]);
     expect(z.result).toEqual([
       { title: 'ESPÈCES', rows: [
         { label: 'Attendu', value: mad(51700) }, { label: 'Compté', value: mad(51000) }, { label: 'Écart', value: `-${mad(700)}`, strong: true },
@@ -266,6 +271,14 @@ describe('ticket d’entrée / sortie d’espèces', () => {
     });
   });
 
+  it('sortie autorisée par un responsable (§11) : son nom sur le ticket', () => {
+    const r = buildMovementReceipt({ movement: { ...movement, approved_by: 'u_3', approver_name: 'Responsable' }, registerName: 'Caisse 1', store, timeZone: 'UTC', copy: false });
+    expect(r.info).toEqual([
+      { label: 'Caisse', value: 'Caisse 1' }, { label: 'Date', value: '12/11/2026 11:15' }, { label: 'Par', value: 'Caissier 1' },
+      { label: 'Autorisé par', value: 'Responsable' },
+    ]);
+  });
+
   it('entrée réimprimée : duplicata, montant positif', () => {
     const r = buildMovementReceipt({ movement: { ...movement, type: 'in' }, registerName: 'Caisse 1', store, timeZone: 'UTC', copy: true });
     expect(r).toMatchObject({ title: 'ENTRÉE D’ESPÈCES', copy: true, amount: { value: `+${mad(5000)}` } });
@@ -299,5 +312,11 @@ describe('ticket de remboursement', () => {
     expect(r.payments).toEqual([{ label: 'Déduit du crédit', value: mad(100) }, { label: 'Rendu en espèces', value: mad(863) }]);
     expect(buildRefundReceipt({ refund, saleNumber: original.number, cashier: 'X', customer: null }, store, 'UTC', true))
       .toMatchObject({ copy: true, info: expect.arrayContaining([{ label: 'Client', value: 'Client de passage' }]) });
+  });
+
+  it('retour autorisé par un responsable (§11) : son nom après le caissier', () => {
+    const r = buildRefundReceipt({ refund, saleNumber: original.number, cashier: 'Caissier 1', customer: null, approver: 'Responsable' }, store, 'UTC', false);
+    expect(r.info.map((i) => i.label)).toEqual(['Retour', 'Ticket d’origine', 'Date', 'Caissier', 'Autorisé par', 'Client']);
+    expect(r.info[4]).toEqual({ label: 'Autorisé par', value: 'Responsable' });
   });
 });

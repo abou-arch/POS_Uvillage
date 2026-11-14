@@ -26,8 +26,10 @@ export async function openCashSession(opening: CashSessionOpening, openerName: s
 }
 
 /** Entrée ou sortie d'espèces, dans la session ouverte. Renvoie le mouvement tel qu'il est gardé (pour son ticket). */
-export async function recordCashMovement(movement: CashMovement, cashierName: string): Promise<LocalCashMovement> {
-  const local: LocalCashMovement = { ...movement, cashier_name: cashierName };
+export async function recordCashMovement(
+  movement: CashMovement, cashierName: string, approverName: string | null = null,
+): Promise<LocalCashMovement> {
+  const local: LocalCashMovement = { ...movement, cashier_name: cashierName, approver_name: approverName };
   await db.transaction('rw', [db.cash_sessions, db.cash_movements, db.outbox], async () => {
     if ((await db.cash_sessions.get(movement.session_id))?.status !== 'open') throw new SessionNotOpenError();
     await db.cash_movements.add(local);
@@ -37,11 +39,13 @@ export async function recordCashMovement(movement: CashMovement, cashierName: st
 }
 
 /** Clôture : la session est marquée clôturée sur la caisse et la clôture part en dernier dans l'outbox. */
-export async function closeCashSession(sessionId: string, closing: CashSessionClosing, closerName: string): Promise<void> {
+export async function closeCashSession(
+  sessionId: string, closing: CashSessionClosing, closerName: string, approverName: string | null = null,
+): Promise<void> {
   await db.transaction('rw', [db.cash_sessions, db.outbox], async () => {
     const session = await db.cash_sessions.get(sessionId);
     if (!session || session.status !== 'open') throw new SessionNotOpenError();
-    await db.cash_sessions.put(closedSession(session, closing, closerName));
+    await db.cash_sessions.put(closedSession(session, closing, closerName, approverName));
     await enqueue({ kind: 'session_close', id: closeKey(sessionId), session_id: sessionId, closing });
   });
 }

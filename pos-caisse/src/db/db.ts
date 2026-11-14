@@ -4,7 +4,7 @@ import type { LocalCashMovement, LocalCashSession } from '../lib/cashSession';
 import type { ReceiptData } from '../lib/receipt';
 import type { HeldSale } from '../state/held';
 import type { OutboxItem } from '../sync/sync';
-import type { Brand, Category, Customer, Product, Refund } from '../types';
+import type { Approver, Brand, Category, Customer, Product, Refund } from '../types';
 
 /** Article en cache : le stock est celui d'un magasin, d'où la clé [store_id + id]. */
 export interface CachedProduct extends Product { store_id: string }
@@ -34,7 +34,11 @@ export interface RefundRow {
   sale_number: string;
   cashier: string;
   customer: string | null;
+  approver?: string | null; // responsable qui a autorisé le retour (§11), absent avant le contrat 0.6
 }
+
+/** Responsable d'un magasin et l'empreinte de son PIN (§11), gardés pour autoriser une opération hors ligne. */
+export interface ApproverRow extends Approver { store_id: string }
 
 /** Réglages de la caisse : dernière synchro du catalogue (par magasin), compteur de tickets (par caisse)… */
 export interface MetaRow { key: string; value: unknown }
@@ -51,6 +55,7 @@ export type PosDb = Dexie & {
   cash_movements: EntityTable<LocalCashMovement, 'id'>;
   journal: EntityTable<JournalRow, 'id'>;
   refunds: EntityTable<RefundRow, 'id'>;
+  approvers: Table<ApproverRow, [string, string]>;
 };
 
 export const db = new Dexie('pos-caisse') as PosDb;
@@ -77,6 +82,11 @@ db.version(2).stores({
 db.version(3).stores({
   journal: 'id, session_id, register_id, sale.number',
   refunds: 'id, session_id, original_sale_id',
+});
+
+// Version 4 (contrat 0.6) : responsables de chaque magasin et empreinte de leur PIN, pour autoriser hors ligne (§11).
+db.version(4).stores({
+  approvers: '[store_id+user_id], store_id',
 });
 
 export const counterKey = (registerId: string) => `ticketCounter.${registerId}`;

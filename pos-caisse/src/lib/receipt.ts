@@ -123,6 +123,7 @@ export function buildSessionReceipt(input: {
   ];
   if (closed && session.closed_at) {
     info.push({ label: 'Clôture', value: date(session.closed_at) }, { label: 'Clôturée par', value: session.closed_by_name ?? '' });
+    if (session.approved_by_name) info.push({ label: 'Autorisée par', value: session.approved_by_name });
   } else {
     info.push({ label: 'Imprimé le', value: date(input.printedAt.toISOString()) });
   }
@@ -215,6 +216,7 @@ export function buildMovementReceipt(input: {
       { label: 'Caisse', value: input.registerName },
       { label: 'Date', value: receiptDate(movement.created_at, input.timeZone) },
       { label: 'Par', value: movement.cashier_name },
+      ...(movement.approver_name ? [{ label: 'Autorisé par', value: movement.approver_name }] : []),
     ],
     reason: movement.reason,
     amount: { label: 'MONTANT', value: signedMad(movement.type === 'in' ? movement.amount : -movement.amount) },
@@ -224,7 +226,13 @@ export function buildMovementReceipt(input: {
 // --- Ticket 80 mm d'un retour ---------------------------------------------------------------------------
 
 /** Ce qu'il faut garder pour (ré)imprimer un ticket de retour : le retour, et ce qu'il ne contient pas. */
-export interface RefundReceiptData { refund: Refund; saleNumber: string; cashier: string; customer: string | null }
+export interface RefundReceiptData {
+  refund: Refund;
+  saleNumber: string;
+  cashier: string;
+  customer: string | null;
+  approver?: string | null; // responsable qui a autorisé le retour (§11)
+}
 
 export interface RefundReceipt {
   store: StoreInfo;
@@ -253,6 +261,7 @@ export function buildRefundReceipt(data: RefundReceiptData, store: StoreInfo, ti
       { label: 'Ticket d’origine', value: data.saleNumber },
       { label: 'Date', value: receiptDate(refund.created_at, timeZone) },
       { label: 'Caissier', value: data.cashier },
+      ...(data.approver ? [{ label: 'Autorisé par', value: data.approver }] : []),
       { label: 'Client', value: data.customer ?? 'Client de passage' },
     ],
     reason: refund.reason_text ? `${REFUND_REASONS[refund.reason]} : ${refund.reason_text}` : REFUND_REASONS[refund.reason],

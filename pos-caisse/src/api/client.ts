@@ -87,6 +87,8 @@ export const api = {
   saleByNumber: (number: string) => request<SaleLookup>(`/sales/by-number/${encodeURIComponent(number)}`),
   createRefund: (refund: Refund) =>
     request<{ id: string; status: string; session_closed?: boolean }>('/refunds', { method: 'POST', body: JSON.stringify(refund) }),
+  // Responsables qui autorisent les opérations d'un caissier, avec l'empreinte de leur PIN (§11) : vérifiés par la caisse.
+  approvers: (storeId: string) => request<{ approvers: unknown[] }>(`/stores/${encodeURIComponent(storeId)}/approvers`),
   // Sessions de caisse (§9)
   currentCashSession: (registerId: string) =>
     request<{ session: CashSession | null }>(`/cash-sessions/current?register_id=${encodeURIComponent(registerId)}`),

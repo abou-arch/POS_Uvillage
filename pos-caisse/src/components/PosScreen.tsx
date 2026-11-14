@@ -1,5 +1,6 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import { AUTO_PRINT, storeInfo, TIME_ZONE } from '../config/store';
+import { useApprovers } from '../db/approvers';
 import { cachedProducts } from '../db/catalog';
 import { cashSessionData, closeCashSession, recordCashMovement, sessionReceipt } from '../db/cashSessions';
 import { db } from '../db/db';
@@ -9,21 +10,26 @@ import { useLiveQuery } from '../db/useLiveQuery';
 import { buildRefund, mergeRefunds, RefundError } from '../lib/buildRefund';
 import { buildSale, type SaleInput } from '../lib/buildSale';
 import {
-  buildClosing, buildMovement, closeBlocker, expectedByMethod, type Counted, type LocalCashMovement, type LocalCashSession,
+  buildClosing, buildMovement, closeBlocker, expectedByMethod, methodCounts, overThreshold, type Counted, type LocalCashMovement,
+  type LocalCashSession,
 } from '../lib/cashSession';
 import { buildMovementReceipt, buildReceipt, buildRefundReceipt, type ReceiptData, type RefundReceiptData } from '../lib/receipt';
-import { formatMad } from '../lib/totals.js';
+import { formatMad, saleTotals } from '../lib/totals.js';
 import { METHOD_LABELS } from '../state/payment';
 import { uuidv4 } from '../lib/uuid';
 import { cartReducer, emptyCart, type CartAction } from '../state/cart';
 import { holdCart, refreshFromCatalog } from '../state/held';
 import { loadLastReceipt, saveLastReceipt } from '../state/lastReceipt';
+import {
+  closingNeedsApproval, discountNeedsApproval, discountsOverLimit, limitLabel, needsApproval, type GuardedAction,
+} from '../state/permissions';
 import type { LastSale } from '../state/sales';
-import { closingThreshold, placeOf } from '../state/session';
+import { closingThreshold, discountLimits, placeOf } from '../state/session';
 import { useHeldSales } from '../state/useHeldSales';
 import { usePrint } from '../state/usePrint';
 import type { SyncState } from '../sync/useSync';
-import type { CashCountLine, CashMovementType, Payment, Sale, Session } from '../types';
+import type { Approver, CashCountLine, CashMovementType, Payment, Sale, Session } from '../types';
+import { ApprovalModal } from './ApprovalModal';
 import { Cart } from './Cart';
 import { CashMovementModal } from './CashMovementModal';
 import { CloseSessionModal } from './CloseSessionModal';
@@ -36,6 +42,12 @@ import { SyncBanners, TopBar } from './TopBar';
 import { Icon } from './ui';
 
 type SessionView = 'menu' | 'movement' | 'close';
+
+/** Qui a autorisé (§11) : un responsable, ou personne quand l'utilisateur connecté n'en a pas besoin. */
+interface Approval { approvedBy: string | null; approverName: string | null }
+
+/** Fenêtre d'autorisation ouverte : l'opération, ce qu'elle concerne, et la suite (null = annulée). */
+interface ApprovalRequest { action: GuardedAction; detail: string | null; resolve: (approver: Approver | null) => void }
 
 const storageMessage = (e: unknown, otherwise: string) => (e instanceof SessionNotOpenError ? e.message : otherwise);
 
@@ -60,6 +72,31 @@ export function PosScreen({ session, cashSession, sync, unreadableSessions, onCl
   const { doc, print } = usePrint();
   const [legacy] = useState(() => legacyUnreadable(session.registerId));
   const checkingOut = useRef(false); // un double appui sur F4 ne crée pas deux ventes
+  const [approval, setApproval] = useState<ApprovalRequest | null>(null);
+  const approvers = useApprovers(session.storeId);
+  const limits = discountLimits(session);
+  const role = session.user.role;
+  // Remises d'un caissier au-delà du plafond (§11) : signalées dans le panier, autorisées par un responsable au paiement.
+  const overLimit = needsApproval(role) ? discountsOverLimit(cart, limits) : null;
+  const discountApproval = discountNeedsApproval(role, cart, limits);
+
+  /**
+   * Autorisation d'un responsable (§11) pour une opération d'un caissier. Un manager ou un admin connecté n'en a pas
+   * besoin, ni une opération qui reste dans les droits du caissier (required = false) : la fenêtre ne s'ouvre pas et
+   * rien n'est enregistré dans approved_by. Renvoie null si elle est annulée.
+   */
+  function authorize(action: GuardedAction, detail: string | null, required = true): Promise<Approval | null> {
+    if (!required || !needsApproval(role)) return Promise.resolve({ approvedBy: null, approverName: null });
+    return new Promise((resolve) => {
+      setApproval({
+        action, detail,
+        resolve: (approver) => {
+          setApproval(null);
+          resolve(approver ? { approvedBy: approver.user_id, approverName: approver.name } : null);
+        },
+      });
+    });
+  }
 
   // Le cache s'affiche tout de suite ; la synchro le met à jour en arrière-plan, et la grille suit.
   const products = useLiveQuery(() => cachedProducts(session.storeId), [session.storeId], []);
@@ -80,21 +117,40 @@ export function PosScreen({ session, cashSession, sync, unreadableSessions, onCl
   const printMovement = (movement: LocalCashMovement, copy: boolean) =>
     print({ kind: 'movement', receipt: buildMovementReceipt({ movement, registerName, store, timeZone: TIME_ZONE, copy }) });
 
+  /** « Plafond 10 % et 50,00 DH · OEUF, remise globale » : ce que le responsable autorise. */
+  function discountDetail(): string {
+    const excess = overLimit ?? { lines: [], global: false };
+    const names = [
+      ...cart.lines.filter((l) => excess.lines.includes(l.product_id)).map((l) => l.name),
+      ...(excess.global ? ['remise globale'] : []),
+    ];
+    const limit = limitLabel(limits, formatMad);
+    return `${limit ? `Plafond ${limit} · ` : ''}${names.join(', ')}`;
+  }
+
   // Encaissement : la vente est d'abord écrite dans l'outbox (avec son numéro de ticket), puis envoyée.
   // Si la base locale refuse l'écriture, rien n'est encaissé et le panier reste là : aucune vente ne se perd.
   async function checkout(payments: Payment[], amountReceived: number) {
     if (checkingOut.current) return;
-    const input: Omit<SaleInput, 'counter'> = {
+    const base: Omit<SaleInput, 'counter'> = {
       cart, storeId: session.storeId, registerId: session.registerId, sessionId: cashSession.id, cashierId: session.user.id,
       payments, amountReceived, id: uuidv4(), lineIds: cart.lines.map(() => uuidv4()), now: new Date(),
     };
     try {
-      buildSale({ ...input, counter: 1 }); // vérifie panier et paiements avant d'écrire quoi que ce soit
+      buildSale({ ...base, counter: 1 }); // vérifie panier et paiements avant d'écrire quoi que ce soit
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Vente impossible.');
       return;
     }
     checkingOut.current = true;
+    // Remise au-delà du plafond du caissier (§11) : un responsable l'autorise, pour toute la vente, au paiement.
+    const approval = await authorize('discount', discountDetail(), discountApproval);
+    if (!approval) {
+      checkingOut.current = false;
+      setError('Vente non enregistrée : la remise au-delà du plafond n’a pas été autorisée. Le panier est conservé.');
+      return;
+    }
+    const input = { ...base, approvedBy: approval.approvedBy };
     const names = { cashier: session.user.name, customer: cart.customer?.name ?? null };
     let sale: Sale;
     try {
@@ -161,6 +217,16 @@ export function PosScreen({ session, cashSession, sync, unreadableSessions, onCl
     document.getElementById('scan')?.focus();
   }
 
+  // Suppression d'une vente en attente : autorisée par un responsable pour un caissier (§11). Rien n'est envoyé (§6).
+  async function deleteHeld(id: string) {
+    const sale = held.list.find((h) => h.id === id);
+    if (!sale) return;
+    const total = saleTotals(sale.cart.lines, sale.cart.otherCharges, sale.cart.globalDiscount).ttc;
+    const approval = await authorize('delete_held', `${formatMad(total)}${sale.note ? ` · ${sale.note}` : ''}`);
+    if (!approval) return;
+    await held.remove(id).catch(() => setError('Suppression impossible : stockage local indisponible.'));
+  }
+
   // Le résumé de la vente précédente disparaît dès qu'un article du client suivant est ajouté.
   function cartDispatch(action: CartAction) {
     if (action.type === 'add') setLastSale(null);
@@ -173,13 +239,17 @@ export function PosScreen({ session, cashSession, sync, unreadableSessions, onCl
   // faits sur ce poste sont relus dans la même transaction : deux validations ne rendent pas deux fois le même article.
   async function saveRefund({ found, quantities, reason, reasonText, payments }: RefundChoice): Promise<string | null> {
     const { sale } = found;
-    const names = { saleNumber: sale.number, cashier: session.user.name, customer: found.customer };
+    // Un caissier fait autoriser chaque retour par un responsable (§11), une fois le remboursement choisi.
+    const total = payments.reduce((s, p) => s + p.amount, 0);
+    const approval = await authorize('refund', `Ticket ${sale.number} · ${formatMad(total)} à rembourser`);
+    if (!approval) return 'Retour non autorisé : rien n’est enregistré.';
+    const names = { saleNumber: sale.number, cashier: session.user.name, customer: found.customer, approver: approval.approverName };
     let refund;
     try {
       refund = await recordRefund(sale.id, (counter, local) => buildRefund({
         sale, refunds: mergeRefunds(sale.id, found.refunds, local), quantities, reason, reasonText, payments,
         cashAvailable: expected.cash, storeId: session.storeId, registerId: session.registerId, sessionId: cashSession.id,
-        cashierId: session.user.id, id: uuidv4(), counter, now: new Date(),
+        cashierId: session.user.id, approvedBy: approval.approvedBy, id: uuidv4(), counter, now: new Date(),
       }), session.registerId, names);
     } catch (e) {
       // Règle du retour (article déjà retourné entre-temps, espèces insuffisantes…) ou session clôturée ailleurs.
@@ -203,11 +273,15 @@ export function PosScreen({ session, cashSession, sync, unreadableSessions, onCl
   }
 
   async function saveMovement(type: CashMovementType, amount: number, reason: string) {
+    // Sortie d'espèces d'un caissier : autorisée par un responsable (§11). Annulée : la fenêtre du mouvement reste ouverte.
+    const approval = await authorize('cash_out', `${formatMad(amount)} · ${reason.trim()}`, type === 'out');
+    if (!approval) return;
     try {
       const movement = buildMovement({
-        id: uuidv4(), sessionId: cashSession.id, type, amount, reason, createdBy: session.user.id, available: expected.cash, now: new Date(),
+        id: uuidv4(), sessionId: cashSession.id, type, amount, reason, createdBy: session.user.id, approvedBy: approval.approvedBy,
+        available: expected.cash, now: new Date(),
       });
-      const saved = await recordCashMovement(movement, session.user.name);
+      const saved = await recordCashMovement(movement, session.user.name, approval.approverName);
       if (AUTO_PRINT) printMovement(saved, false); // la preuve papier du mouvement, à signer
     } catch (e) {
       setError(storageMessage(e, 'Stockage local indisponible : le mouvement d’espèces n’est pas enregistré.'));
@@ -227,13 +301,18 @@ export function PosScreen({ session, cashSession, sync, unreadableSessions, onCl
 
   // Après la clôture, la caisse revient d'elle-même à l'écran d'ouverture, qui imprime le rapport.
   async function closeSession(counted: Counted, cashCount: CashCountLine[] | null, note: string) {
+    // Écart au-delà du seuil, clôture d'un caissier : un responsable l'autorise (§11). Annulée : la fenêtre reste ouverte.
+    const threshold = closingThreshold(session);
+    const counts = methodCounts(expected, counted) ?? [];
+    const detail = overThreshold(counts, threshold).map((c) => `${METHOD_LABELS[c.method]} : écart ${formatMad(c.difference)}`).join(' · ');
+    const approval = await authorize('closing', `${detail} (seuil ${formatMad(threshold)})`, closingNeedsApproval(role, counts, threshold));
+    if (!approval) return;
     try {
       const closing = buildClosing({
-        counted, expected, cashCount, note, role: session.user.role, threshold: closingThreshold(session),
-        closedBy: session.user.id, now: new Date(),
+        counted, expected, cashCount, note, role, threshold, closedBy: session.user.id, approvedBy: approval.approvedBy, now: new Date(),
       });
       onClosed(cashSession.id);
-      await closeCashSession(cashSession.id, closing, session.user.name);
+      await closeCashSession(cashSession.id, closing, session.user.name, approval.approverName);
       sync.sync();
     } catch (e) {
       setSessionView(null);
@@ -306,7 +385,7 @@ export function PosScreen({ session, cashSession, sync, unreadableSessions, onCl
       <SyncBanners sync={sync} unreadable={unreadable} />
       <main>
         <Cart cart={cart} dispatch={cartDispatch} products={products.value} lastSale={lastSale && lastSaleView(lastSale)}
-          onCheckout={checkout} onHold={hold} />
+          overLimit={overLimit} onCheckout={checkout} onHold={hold} />
         <ProductGrid products={products.value} categories={categories} brands={brands}
           onAdd={(product) => {
             cartDispatch({ type: 'add', product });
@@ -315,7 +394,7 @@ export function PosScreen({ session, cashSession, sync, unreadableSessions, onCl
       </main>
       {showHeld && (
         <HeldListModal list={held.list} cartEmpty={cart.lines.length === 0} onResume={resume}
-          onDelete={(id) => void held.remove(id).catch(() => setError('Suppression impossible : stockage local indisponible.'))}
+          onDelete={(id) => void deleteHeld(id)}
           onClose={() => { setShowHeld(false); document.getElementById('scan')?.focus(); }} />
       )}
       {sessionReady && sessionView === 'menu' && (
@@ -327,7 +406,7 @@ export function PosScreen({ session, cashSession, sync, unreadableSessions, onCl
       )}
       {sessionReady && sessionView === 'movement' && <CashMovementModal expected={expected.cash} onSave={saveMovement} onClose={closeSessionView} />}
       {sessionReady && sessionView === 'close' && (
-        <CloseSessionModal expected={expected} role={session.user.role} threshold={closingThreshold(session)}
+        <CloseSessionModal expected={expected} role={role} threshold={closingThreshold(session)}
           blocker={closeBlocker(held.list.length, cart.lines.length)}
           onShowHeld={held.list.length > 0 ? () => { setSessionView(null); setShowHeld(true); } : null}
           onConfirm={closeSession} onClose={closeSessionView} />
@@ -335,6 +414,10 @@ export function PosScreen({ session, cashSession, sync, unreadableSessions, onCl
       {sessionReady && refunding && (
         <RefundModal storeId={session.storeId} cashAvailable={expected.cash} onSave={saveRefund}
           onClose={() => { setRefunding(false); document.getElementById('scan')?.focus(); }} />
+      )}
+      {approval && (
+        <ApprovalModal action={approval.action} detail={approval.detail} approvers={approvers.list}
+          onApproved={(a) => approval.resolve(a)} onCancel={() => approval.resolve(null)} />
       )}
       <PrintSheet doc={doc} />
     </div>

@@ -52,8 +52,10 @@ const isUser = (v: unknown): v is User =>
   isRecord(v) && isId(v.id) && typeof v.name === 'string' && ['admin', 'manager', 'cashier'].includes(v.role as string);
 const isRegister = (v: unknown): v is Register => isRecord(v) && isId(v.id) && typeof v.name === 'string';
 const isThreshold = (v: unknown) => Number.isSafeInteger(v) && (v as number) >= 0;
+const isPercent = (v: unknown) => v === null || (Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 100);
 const isStore = (v: unknown): v is Store =>
   isRecord(v) && isId(v.id) && typeof v.name === 'string' && isThreshold(v.closing_difference_threshold)
+  && isPercent(v.cashier_max_discount_percent) && (v.cashier_max_discount === null || isThreshold(v.cashier_max_discount))
   && Array.isArray(v.registers) && v.registers.every(isRegister);
 /** Réponse du login (§2) complète et utilisable : vérifiée à la connexion et à chaque relecture. */
 export const isAuth = (v: unknown): v is Auth =>
@@ -82,4 +84,12 @@ export function placeOf(session: Session): { storeName: string; registerName: st
 /** Écart de clôture autorisé dans le magasin choisi (§2) : au-delà, un caissier ne clôture pas seul. */
 export function closingThreshold(session: Session): number {
   return session.stores.find((s) => s.id === session.storeId)?.closing_difference_threshold ?? 0;
+}
+
+/** Plafond de remise d'un caissier dans le magasin choisi (§2) ; null = pas de plafond de ce type. */
+export function discountLimits(session: Session): { percent: number | null; amount: number | null } {
+  const store = session.stores.find((s) => s.id === session.storeId);
+  // Magasin introuvable (ne devrait pas arriver) : aucune remise sans autorisation.
+  if (!store) return { percent: 0, amount: 0 };
+  return { percent: store.cashier_max_discount_percent, amount: store.cashier_max_discount };
 }

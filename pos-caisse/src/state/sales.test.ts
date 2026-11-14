@@ -45,6 +45,12 @@ describe('ventes gardées sur la caisse', () => {
     savePending({ sales: [{ sale: mixed, error: null }], unreadable: [] }, storage);
     expect(loadPending(storage)).toEqual({ sales: [{ sale: mixed, error: null }], unreadable: [] });
   });
+  it('relit une vente autorisée par un responsable, et une vente d’avant le contrat 0.6 sans approved_by', () => {
+    const { approved_by: _a, ...before06 } = sale;
+    const approved = { ...sale, id: uuidv4(), approved_by: 'u_3' };
+    const queue = { sales: [{ sale: approved, error: null }, { sale: before06, error: null }], unreadable: [] };
+    expect(loadPending(stored(queue.sales))).toEqual(queue);
+  });
   it('met de côté une entrée illisible, sans jamais l’envoyer ni la perdre', () => {
     // { sale: { id } } : avant, elle était relue comme une vente et partait telle quelle au serveur.
     const broken = [{ sale: { id: sale.id } }, { sale }, { sale, error: 42 }, 1, null];
@@ -75,6 +81,8 @@ describe('ventes gardées sur la caisse', () => {
       { payments: [{ method: 'cheque', amount: 1000 }] },
       { send_sms: 'oui' },
       { status: 'pending' },
+      { approved_by: '' }, // ni null ni un id (§11)
+      { approved_by: 3 },
     ];
     for (const change of changes) {
       const { sales, unreadable } = loadPending(stored([{ sale: { ...sale, ...change }, error: null }]));

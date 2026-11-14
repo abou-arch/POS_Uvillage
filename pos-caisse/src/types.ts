@@ -4,8 +4,25 @@ export type Role = 'admin' | 'manager' | 'cashier';
 
 export interface User { id: string; name: string; role: Role }
 export interface Register { id: string; name: string }
-/** closing_difference_threshold : écart de clôture autorisé dans ce magasin, en centimes (§2, §9). */
-export interface Store { id: string; name: string; closing_difference_threshold: number; registers: Register[] }
+/**
+ * closing_difference_threshold : écart de clôture autorisé dans ce magasin, en centimes (§2, §9).
+ * cashier_max_discount_percent (0 à 100) et cashier_max_discount (centimes) : remise qu'un caissier fait seul (§2, §11) ;
+ * null = pas de plafond de ce type.
+ */
+export interface Store {
+  id: string;
+  name: string;
+  closing_difference_threshold: number;
+  cashier_max_discount_percent: number | null;
+  cashier_max_discount: number | null;
+  registers: Register[];
+}
+
+/** Empreinte du PIN d'un responsable (§11) : PBKDF2 HMAC-SHA-256, sel et résultat en base64. */
+export interface PinHash { algorithm: 'PBKDF2-SHA256'; iterations: number; salt: string; hash: string }
+
+/** Responsable qui peut autoriser une opération dans un magasin (GET /api/stores/{id}/approvers, §11). */
+export interface Approver { user_id: string; name: string; pin: PinHash }
 
 // Réponse de POST /auth/login : connecté, magasin et caisse pas encore choisis.
 export interface Auth { token: string; user: User; stores: Store[] }
@@ -67,6 +84,8 @@ export interface Sale {
   register_id: string;
   session_id: string; // session de caisse ouverte au moment de la vente (§9)
   cashier_id: string;
+  /** Responsable qui a autorisé une remise au-delà du plafond (§11). Absent des ventes d'avant le contrat 0.6. */
+  approved_by?: string | null;
   customer_id: string | null;
   created_at: string;
   lines: SaleLine[];
@@ -105,6 +124,8 @@ export interface CashCountLine { value: number; quantity: number }
 /** Ce que la caisse envoie à la clôture (POST /api/cash-sessions/{id}/close). */
 export interface CashSessionClosing {
   closed_by: string;
+  /** Responsable qui a autorisé la clôture d'un caissier au-delà du seuil (§11). Absent avant le contrat 0.6. */
+  approved_by?: string | null;
   closed_at: string;
   counts: MethodCount[]; // cash, card, mobile : une fois chacun
   cash_count: CashCountLine[] | null; // null : total des espèces saisi directement
@@ -131,6 +152,8 @@ export interface CashMovement {
   amount: number;
   reason: string;
   created_by: string;
+  /** Responsable qui a autorisé la sortie d'un caissier (§11). Absent des mouvements d'avant le contrat 0.6. */
+  approved_by?: string | null;
   created_at: string;
 }
 
@@ -161,6 +184,8 @@ export interface Refund {
   session_id: string;
   original_sale_id: string;
   cashier_id: string;
+  /** Responsable qui a autorisé le retour d'un caissier (§11). Absent des retours d'avant le contrat 0.6. */
+  approved_by?: string | null;
   customer_id: string | null;
   created_at: string;
   reason: RefundReason;

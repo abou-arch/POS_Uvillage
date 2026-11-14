@@ -2,15 +2,23 @@
 // Les taux de TVA sont des valeurs de test, pas des taux validés.
 // Montants en centimes de dirham (MAD).
 
+// pin : code PIN de test des responsables (§11). La fausse API n'en donne que l'empreinte, comme la vraie.
 export const users = [
-  { id: 'u_1', username: 'admin', password: 'admin', name: 'Falcon', role: 'admin', store_ids: ['st_1', 'st_2'] },
-  { id: 'u_2', username: 'caissier', password: 'caissier', name: 'Caissier 1', role: 'cashier', store_ids: ['st_2'] },
-  { id: 'u_3', username: 'responsable', password: 'responsable', name: 'Responsable', role: 'manager', store_ids: ['st_1', 'st_2'] },
+  { id: 'u_1', username: 'admin', password: 'admin', name: 'Falcon', role: 'admin', store_ids: ['st_1', 'st_2'], pin: '135790' },
+  { id: 'u_2', username: 'caissier', password: 'caissier', name: 'Caissier 1', role: 'cashier', store_ids: ['st_2'], pin: null },
+  { id: 'u_3', username: 'responsable', password: 'responsable', name: 'Responsable', role: 'manager', store_ids: ['st_1', 'st_2'], pin: '246810' },
 ];
 
+// Plafond de remise d'un caissier (§2) : 10 % et 50 DH au centre, 10 % sans plafond en DH au quartier.
 export const stores = [
-  { id: 'st_1', name: 'Magasin centre', closing_difference_threshold: 2000, registers: [{ id: 'reg_1', name: 'Caisse 1' }, { id: 'reg_2', name: 'Caisse 2' }] },
-  { id: 'st_2', name: 'Magasin quartier', closing_difference_threshold: 2000, registers: [{ id: 'reg_3', name: 'Caisse 1' }] },
+  {
+    id: 'st_1', name: 'Magasin centre', closing_difference_threshold: 2000, cashier_max_discount_percent: 10, cashier_max_discount: 5000,
+    registers: [{ id: 'reg_1', name: 'Caisse 1' }, { id: 'reg_2', name: 'Caisse 2' }],
+  },
+  {
+    id: 'st_2', name: 'Magasin quartier', closing_difference_threshold: 2000, cashier_max_discount_percent: 10, cashier_max_discount: null,
+    registers: [{ id: 'reg_3', name: 'Caisse 1' }],
+  },
 ];
 
 export const categories = [

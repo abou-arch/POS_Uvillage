@@ -30,7 +30,8 @@ const clamp = (n: number, min: number, max: number) => Math.min(Math.max(Number.
 /** Un SMS n'est possible que si le client a un téléphone (le client de passage n'en a pas). */
 export const canSendSms = (state: CartState) => !!state.customer?.phone;
 
-const lineGross = (l: CartLine) => Math.round(l.quantity * l.unit_price_ttc);
+/** Montant d'une ligne avant sa remise : la base de la remise de ligne. */
+export const lineGross = (l: CartLine) => Math.round(l.quantity * l.unit_price_ttc);
 
 /**
  * Une remise ne dépasse jamais ce qu'elle réduit, sinon le total deviendrait négatif :

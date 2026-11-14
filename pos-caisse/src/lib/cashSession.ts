@@ -1,7 +1,8 @@
 // Session de caisse (§9 du contrat) : fond de caisse, entrées / sorties d'espèces, clôture et rapport.
 // Fonctions pures : la base locale et les écrans ne font qu'appeler ce qui est décidé et testé ici.
 import { METHOD_LABELS } from '../state/payment';
-import { isCents, isDate, isUuid } from '../state/sales';
+import { closingNeedsApproval } from '../state/permissions';
+import { isApproval, isCents, isDate, isUuid } from '../state/sales';
 import type {
   CashCountLine, CashMovement, CashMovementType, CashSession, CashSessionClosing, CashSessionOpening, CountedMethod, MethodCount,
   Payment, PaymentMethod, Refund, Role, Sale,
@@ -18,11 +19,19 @@ export const MAX_TEXT_LENGTH = 200; // motif et notes (§9)
 
 export const MOVEMENT_LABELS: Record<CashMovementType, string> = { in: 'Entrée', out: 'Sortie' };
 
-/** Session gardée sur la caisse : l'objet du §9, plus les noms imprimés sur le rapport. */
-export interface LocalCashSession extends CashSession { opened_by_name: string; closed_by_name: string | null }
+/**
+ * Session gardée sur la caisse : l'objet du §9, plus les noms imprimés sur le rapport. approved_by_name : le responsable
+ * qui a autorisé la clôture (§11), absent des sessions d'avant le contrat 0.6.
+ */
+export interface LocalCashSession extends CashSession {
+  opened_by_name: string;
+  closed_by_name: string | null;
+  approved_by?: string | null;
+  approved_by_name?: string | null;
+}
 
-/** Mouvement gardé sur la caisse, avec le nom de celui qui l'a fait (created_by). */
-export interface LocalCashMovement extends CashMovement { cashier_name: string }
+/** Mouvement gardé sur la caisse, avec le nom de celui qui l'a fait (created_by) et de celui qui l'a autorisé (§11). */
+export interface LocalCashMovement extends CashMovement { cashier_name: string; approver_name?: string | null }
 
 /** Date au format du contrat, à la seconde : « 2026-11-12T08:02:00Z ». */
 const contractDate = (d: Date) => d.toISOString().replace(/\.\d{3}Z$/, 'Z');
@@ -154,20 +163,23 @@ export function methodCounts(expected: Expected, counted: Counted): MethodCount[
 export const overThreshold = (counts: MethodCount[], threshold: number) =>
   counts.filter((c) => Math.abs(c.difference) > threshold);
 
-/** Au-delà du seuil, seuls manager et admin valident la clôture (le code PIN arrivera à l'étape 6d). */
-export function thresholdError(counts: MethodCount[], threshold: number, role: Role): string | null {
-  const over = overThreshold(counts, threshold);
-  if (role !== 'cashier' || over.length === 0) return null;
-  const labels = over.map((c) => METHOD_LABELS[c.method].toLowerCase()).join(', ');
-  return `Écart de plus de ${formatMad(threshold)} (${labels}) : faites valider la clôture par un responsable.`;
+/**
+ * Au-delà du seuil, un caissier fait autoriser la clôture par un responsable (§11) ; manager et admin clôturent seuls.
+ * Renvoie le message tant que l'autorisation manque.
+ */
+export function thresholdError(counts: MethodCount[], threshold: number, role: Role, approvedBy: string | null = null): string | null {
+  if (!closingNeedsApproval(role, counts, threshold) || approvedBy) return null;
+  const labels = overThreshold(counts, threshold).map((c) => METHOD_LABELS[c.method].toLowerCase()).join(', ');
+  return `Écart de plus de ${formatMad(threshold)} (${labels}) : un responsable doit autoriser la clôture.`;
 }
 
 /**
  * Clôture : chaque montant compté plausible ; le détail des billets et pièces, s'il y en a un, donne bien les
- * espèces comptées ; au-delà du seuil, un caissier ne valide pas ; dès qu'il y a un écart, la note est obligatoire.
+ * espèces comptées ; dès qu'il y a un écart, la note est obligatoire. Le seuil est vérifié à part (thresholdError) :
+ * au-delà, la clôture reste possible, avec l'autorisation d'un responsable.
  */
 export function closingError(input: {
-  counted: Counted; expected: Expected; cashCount: CashCountLine[] | null; note: string; role: Role; threshold: number;
+  counted: Counted; expected: Expected; cashCount: CashCountLine[] | null; note: string;
 }): string | null {
   for (const method of COUNTED_METHODS) {
     const error = countedError(input.counted[method], method);
@@ -178,8 +190,7 @@ export function closingError(input: {
   if (input.cashCount !== null && countTotal(input.cashCount) !== input.counted.cash) {
     return 'Le comptage des billets et pièces ne donne pas les espèces comptées.';
   }
-  return thresholdError(counts, input.threshold, input.role)
-    ?? (counts.some((c) => c.difference !== 0) && cleanText(input.note) === '' ? 'Il y a un écart : expliquez-le dans la note (obligatoire).' : null);
+  return counts.some((c) => c.difference !== 0) && cleanText(input.note) === '' ? 'Il y a un écart : expliquez-le dans la note (obligatoire).' : null;
 }
 
 /** Ce qui empêche de clôturer : des ventes en attente (à reprendre ou supprimer), ou un panier en cours. */
@@ -205,25 +216,25 @@ export function buildOpening(input: {
 
 export function buildMovement(input: {
   id: string; sessionId: string; type: CashMovementType; amount: number | null; reason: string; createdBy: string;
-  available: number; now: Date;
+  approvedBy?: string | null; available: number; now: Date;
 }): CashMovement {
   const error = movementError(input.type, input.amount, input.reason, input.available);
   if (error || input.amount === null) throw new Error(error ?? 'Montant invalide.');
   return {
     id: input.id, session_id: input.sessionId, type: input.type, amount: input.amount, reason: cleanText(input.reason),
-    created_by: input.createdBy, created_at: contractDate(input.now),
+    created_by: input.createdBy, approved_by: input.approvedBy ?? null, created_at: contractDate(input.now),
   };
 }
 
 export function buildClosing(input: {
   counted: Counted; expected: Expected; cashCount: CashCountLine[] | null; note: string; role: Role; threshold: number;
-  closedBy: string; now: Date;
+  closedBy: string; approvedBy?: string | null; now: Date;
 }): CashSessionClosing {
-  const error = closingError(input);
   const counts = methodCounts(input.expected, input.counted);
+  const error = closingError(input) ?? (counts ? thresholdError(counts, input.threshold, input.role, input.approvedBy ?? null) : null);
   if (error || !counts) throw new Error(error ?? 'Montant invalide.');
   return {
-    closed_by: input.closedBy, closed_at: contractDate(input.now), counts,
+    closed_by: input.closedBy, approved_by: input.approvedBy ?? null, closed_at: contractDate(input.now), counts,
     cash_count: input.cashCount, closing_note: noteOrNull(input.note),
   };
 }
@@ -235,8 +246,9 @@ export const openedSession = (opening: CashSessionOpening, openerName: string): 
   closed_by_name: null,
 });
 
-export const closedSession = (session: LocalCashSession, closing: CashSessionClosing, closerName: string): LocalCashSession =>
-  ({ ...session, ...closing, status: 'closed', closed_by_name: closerName });
+export const closedSession = (
+  session: LocalCashSession, closing: CashSessionClosing, closerName: string, approverName: string | null = null,
+): LocalCashSession => ({ ...session, ...closing, status: 'closed', closed_by_name: closerName, approved_by_name: approverName });
 
 // --- Relecture de la base locale (autre version de la caisse, données abîmées) ---------------------------
 
@@ -258,7 +270,7 @@ const isCashCount = (v: unknown): v is CashCountLine[] =>
   && new Set(v.map((l: CashCountLine) => l.value)).size === v.length;
 
 export function isClosing(v: unknown): v is CashSessionClosing {
-  if (!isRecord(v) || !isId(v.closed_by) || !isDate(v.closed_at) || !isNote(v.closing_note)) return false;
+  if (!isRecord(v) || !isId(v.closed_by) || !isApproval(v.approved_by) || !isDate(v.closed_at) || !isNote(v.closing_note)) return false;
   const counts: unknown = v.counts;
   if (!Array.isArray(counts) || counts.length !== COUNTED_METHODS.length || !counts.every(isMethodCount)) return false;
   const byMethod = (m: CountedMethod) => (counts as MethodCount[]).find((c) => c.method === m);
@@ -270,18 +282,21 @@ export function isClosing(v: unknown): v is CashSessionClosing {
 export const isMovement = (v: unknown): v is CashMovement =>
   isRecord(v) && isUuid(v.id) && isUuid(v.session_id) && (v.type === 'in' || v.type === 'out')
   && isCents(v.amount) && v.amount > 0 && typeof v.reason === 'string' && isNote(v.reason) && isId(v.created_by)
-  && isDate(v.created_at);
+  && isApproval(v.approved_by) && isDate(v.created_at);
 
 const CLOSING_FIELDS = ['closed_by', 'closed_at', 'counts', 'cash_count', 'closing_note', 'closed_by_name'];
 
 export function isLocalSession(v: unknown): v is LocalCashSession {
   if (!isOpening(v) || !isRecord(v) || typeof v.opened_by_name !== 'string') return false;
-  if (v.status === 'open') return CLOSING_FIELDS.every((k) => v[k] === null);
+  const approverName = v.approved_by_name === undefined || v.approved_by_name === null || typeof v.approved_by_name === 'string';
+  if (!approverName) return false;
+  if (v.status === 'open') return CLOSING_FIELDS.every((k) => v[k] === null) && (v.approved_by ?? null) === null;
   return v.status === 'closed' && isClosing(v) && typeof v.closed_by_name === 'string';
 }
 
 export const isLocalMovement = (v: unknown): v is LocalCashMovement =>
-  isMovement(v) && isRecord(v) && typeof v.cashier_name === 'string';
+  isMovement(v) && isRecord(v) && typeof v.cashier_name === 'string'
+  && (v.approver_name === undefined || v.approver_name === null || typeof v.approver_name === 'string');
 
 // --- Rapport (X pendant la session, Z à la clôture) ---------------------------------------------------
 

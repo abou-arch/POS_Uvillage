@@ -10,6 +10,7 @@ export interface SaleInput {
   registerId: string;
   sessionId: string; // session de caisse ouverte (§9)
   cashierId: string;
+  approvedBy?: string | null; // responsable qui a autorisé une remise au-delà du plafond (§11)
   payments: Payment[];
   amountReceived: number; // espèces remises par le client ; le rendu en découle
   id: string; // UUID v4 généré par la caisse
@@ -53,6 +54,7 @@ export function buildSale(input: SaleInput): Sale {
     register_id: input.registerId,
     session_id: input.sessionId,
     cashier_id: input.cashierId,
+    approved_by: input.approvedBy ?? null,
     customer_id: cart.customer?.id ?? null,
     created_at: input.now.toISOString().replace(/\.\d{3}Z$/, 'Z'), // « 2026-10-05T14:32:10Z » comme le contrat
     lines,

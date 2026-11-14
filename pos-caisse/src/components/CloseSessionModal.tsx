@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import {
   closingError, COUNTED_METHODS, countedError, MAX_TEXT_LENGTH, methodCounts, thresholdError, type Counted, type Expected,
 } from '../lib/cashSession';
+import { needsApproval } from '../state/permissions';
 import { madInput, parseSignedMad } from '../lib/money';
 import { signedMad } from '../lib/receipt';
 import { formatMad } from '../lib/totals.js';
@@ -14,7 +15,7 @@ import { Icon } from './ui';
 
 // Clôture (§9) : pour chaque moyen de paiement, attendu, compté et écart. Les espèces se comptent en saisissant
 // le total ou billet par billet ; carte et mobile sont préremplis avec l'attendu, à corriger avec le total du
-// terminal. Un écart doit être expliqué ; au-delà du seuil du magasin, un caissier ne valide pas seul.
+// terminal. Un écart doit être expliqué ; au-delà du seuil du magasin, un caissier fait autoriser la clôture (§11).
 // Impossible tant qu'une vente est en attente ou qu'un panier est en cours.
 export function CloseSessionModal({ expected, role, threshold, blocker, onShowHeld, onConfirm, onClose }: {
   expected: Expected;
@@ -39,9 +40,10 @@ export function CloseSessionModal({ expected, role, threshold, blocker, onShowHe
   const counted: Counted = { cash: cash.cents, card: read(card), mobile: read(mobile) };
   const counts = methodCounts(expected, counted);
   const gap = counts?.some((c) => c.difference !== 0) ?? false;
-  const overLimit = counts ? thresholdError(counts, threshold, role) : null;
-  const error = cash.countError ?? closingError({ counted, expected, cashCount: cash.cashCount, note, role, threshold });
-  const shown = cash.countError ?? overLimit ?? (tried ? error : null);
+  // Au-delà du seuil : la clôture reste possible, un responsable l'autorise avec son PIN en la confirmant.
+  const overLimit = counts && needsApproval(role) ? thresholdError(counts, threshold, role) : null;
+  const error = cash.countError ?? closingError({ counted, expected, cashCount: cash.cashCount, note });
+  const shown = cash.countError ?? (tried ? error : null);
 
   if (blocker) {
     return (
@@ -124,6 +126,9 @@ export function CloseSessionModal({ expected, role, threshold, blocker, onShowHe
             aria-invalid={tried && gap && note.trim() === ''} onChange={(e) => { setNote(e.target.value); edit(); }} />
         </label>
         {shown && <p className="field-error" role="alert">{shown}</p>}
+        {overLimit && !shown && (
+          <p className="notice" role="status"><Icon name="lock" size={18} />{overLimit} Il le fera avec son PIN à la confirmation.</p>
+        )}
         {confirming && !error && (
           <p className="notice" role="alert">
             <Icon name="alert" size={18} />La clôture est définitive : plus aucune vente ne pourra être faite dans cette session.
@@ -131,7 +136,7 @@ export function CloseSessionModal({ expected, role, threshold, blocker, onShowHe
         )}
         <div className="modal-actions">
           <button type="button" className="btn secondary" onClick={onClose}>Annuler</button>
-          <button className="btn danger" disabled={saving || overLimit !== null}>
+          <button className="btn danger" disabled={saving}>
             <Icon name="lock" size={18} />{confirming ? 'Confirmer la clôture' : 'Clôturer la caisse'}
           </button>
         </div>

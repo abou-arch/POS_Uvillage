@@ -167,6 +167,16 @@ describe('document de retour (§10)', () => {
     expect(() => refund(S, [], [[0, 4]], [{ method: 'cash', amount: 3509 }])).toThrow('3 au plus');
     expect(() => refund(S, [], [[0, 1]], undefined, { cashAvailable: 100 })).toThrow('tiroir');
   });
+  it('retour autorisé par un responsable (§10, §11) : approved_by envoyé ; absent avant le contrat 0.6', () => {
+    expect(refund(S, [], [[0, 1]]).approved_by).toBeNull();
+    const r = refund(S, [], [[0, 1]], undefined, { approvedBy: 'u_3' });
+    expect(r.approved_by).toBe('u_3');
+    expect(isRefund(r)).toBe(true);
+    const { approved_by: _a, ...before06 } = r;
+    expect(isRefund(before06)).toBe(true);
+    expect(isRefund({ ...r, approved_by: '' })).toBe(false);
+    expect(isRefund({ ...r, approved_by: 3 })).toBe(false);
+  });
   it('relecture : un retour abîmé n’est pas reconnu', () => {
     const r = refund(S, [], [[0, 1]]);
     expect(isRefund({ ...r, number: 'ST2-REG3-000001' })).toBe(false);

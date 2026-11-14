@@ -1,10 +1,15 @@
 # Contrat d'API — Caisse (POS) ↔ Application web
 
-Version 0.5 — proposition à valider par l'équipe.
+Version 0.6 — proposition à valider par l'équipe.
 
 Changements par version :
 
-- **0.5** : retours et remboursements.
+- **0.6** : droits du caissier et autorisation d'un responsable.
+  - §2 : plafond de remise d'un caissier, par magasin (`cashier_max_discount_percent`, `cashier_max_discount`).
+  - Nouveau §11 : opérations qu'un caissier ne fait pas seul. Un responsable les autorise avec son code PIN, vérifié par la caisse même hors ligne grâce à l'empreinte téléchargée par `GET /api/stores/{store_id}/approvers`.
+  - §5, §9, §10 : champ `approved_by` (qui a autorisé) dans la vente, le mouvement d'espèces, la clôture et le retour.
+  - §8 : le point 5 est tranché. Nouveau point 10 (PIN des responsables).
+- 0.5 : retours et remboursements.
   - Nouveau §10 : `POST /api/refunds`, idempotent, envoyé par la même file que les ventes.
   - §5 : chaque ligne de vente a un `id`. Nouvel endpoint `GET /api/sales/by-number/{number}` pour retrouver une vente et ses retours. Une vente qui a des retours ne peut plus être annulée.
   - §7 : règle du montant remboursé, à valider avec le comptable.
@@ -56,6 +61,8 @@ Codes HTTP : `400` données invalides · `401` non connecté · `403` interdit �
       "id": "st_1",
       "name": "Magasin centre",
       "closing_difference_threshold": 2000,
+      "cashier_max_discount_percent": 10,
+      "cashier_max_discount": 5000,
       "registers": [ { "id": "reg_1", "name": "Caisse 1" } ]
     }
   ]
@@ -65,6 +72,8 @@ Codes HTTP : `400` données invalides · `401` non connecté · `403` interdit �
 Rôles attendus côté caisse : `admin`, `manager`, `cashier`. Un caissier ne voit que les magasins auxquels il est rattaché.
 
 `closing_difference_threshold` : écart de clôture autorisé dans ce magasin, en centimes (entier ≥ 0). Au-delà, un caissier ne peut pas valider seul la clôture de sa session (§9). La caisse garde cette valeur avec la connexion, pour s'en servir hors ligne.
+
+`cashier_max_discount_percent` (entier de 0 à 100) et `cashier_max_discount` (centimes, entier ≥ 0) : remise qu'un caissier peut faire seul dans ce magasin, sur une ligne ou sur la vente. `null` veut dire qu'il n'y a pas de plafond de ce type. Au-delà de l'un des deux, il faut l'autorisation d'un responsable (§11). La caisse garde ces valeurs avec la connexion, comme le seuil d'écart.
 
 ## 3. Catalogue (lecture seule pour la caisse)
 
@@ -144,6 +153,7 @@ Crée une vente. **Idempotent** : si une vente avec le même `id` existe déjà,
   "register_id": "reg_1",
   "session_id": "3b9d6c1e-8f2a-4d5b-9c7e-1a2b3c4d5e6f",
   "cashier_id": "u_12",
+  "approved_by": null,
   "customer_id": null,
   "created_at": "2026-10-05T14:32:10Z",
   "lines": [
@@ -184,6 +194,7 @@ Règles :
   - Une session d'un autre magasin ou d'une autre caisse est refusée (`422 SESSION_MISMATCH`).
   - Une session inconnue de l'API est refusée (`422 SESSION_UNKNOWN`).
   - Si la session est déjà clôturée, l'API **accepte la vente** et la signale (`session_closed: true`), car la vente a eu lieu. Ce cas n'arrive que pour une vente refusée puis renvoyée après la clôture (§9).
+- `approved_by` : le responsable qui a autorisé une remise au-delà du plafond du caissier (§11), ou `null`.
 
 Réponse `201` (ou `200` si déjà reçue) :
 
@@ -284,17 +295,18 @@ Implémentation de référence : `src/lib/totals.js` (`paidByLine`, `refundLine`
 2. Liste exacte des taux de TVA et mentions obligatoires du ticket (ICE…) — avec le comptable.
 3. Format de `number` (numérotation continue par caisse ?).
 4. SMS : qui l'envoie (API à la réception de la vente si `send_sms: true`) ?
-5. Remise : plafond autorisé pour un caissier ?
+5. ~~Remise : plafond autorisé pour un caissier ?~~ Tranché en 0.6 : plafond en % et en DH par magasin (§2), autorisation d'un responsable au-delà (§11).
 6. Matricule : unique par client ? Si oui, l'API refuse un doublon (`409`).
 7. Sessions de caisse : clôture d'une session depuis le back-office (poste en panne, données du poste effacées).
 8. Retours : un article retourné comme défectueux est-il remis dans le stock vendable ? Pour l'instant, l'API remet le stock de tout article retourné (§10).
 9. Retours à crédit : si le client a déjà réglé sa dette, un retour en `credit` la rend négative. Faut-il alors rembourser en espèces ?
+10. PIN des responsables (§11) : qui le fixe et le change dans le back-office ? Longueur (6 chiffres proposés) ? Changement obligatoire au départ d'un responsable ?
 
 ## 9. Sessions de caisse
 
 Chaque caisse travaille dans une **session** : elle est ouverte avec un fond de caisse et clôturée en comptant, pour chaque moyen de paiement, ce qui a été réellement encaissé (espèces du tiroir, total du terminal de carte, total du paiement mobile). **Une seule session ouverte par caisse.** Chaque vente (§5) et chaque mouvement d'espèces porte le `session_id` de la session ouverte.
 
-`opened_by`, `closed_by`, `cashier_id` (ventes) et `created_by` (mouvements) désignent l'utilisateur qui a fait l'opération sur la caisse. Il peut être différent de l'utilisateur du token : après une reconnexion, la caisse envoie aussi les opérations faites avant par un autre caissier. Tous les rôles peuvent ouvrir, faire un mouvement et clôturer, sauf la clôture avec un écart au-delà du seuil du magasin, réservée à `manager` et `admin` (voir la clôture ; autres autorisations : §8, point 5).
+`opened_by`, `closed_by`, `cashier_id` (ventes) et `created_by` (mouvements) désignent l'utilisateur qui a fait l'opération sur la caisse. Il peut être différent de l'utilisateur du token : après une reconnexion, la caisse envoie aussi les opérations faites avant par un autre caissier. Tous les rôles peuvent ouvrir, faire un mouvement et clôturer. Un caissier a besoin de l'autorisation d'un responsable pour une sortie d'espèces et pour une clôture avec un écart au-delà du seuil du magasin (§11).
 
 ### Objet session
 
@@ -309,6 +321,7 @@ Chaque caisse travaille dans une **session** : elle est ouverte avec un fond de 
   "opening_cash": 50000,
   "opening_note": null,
   "closed_by": null,
+  "approved_by": null,
   "closed_at": null,
   "counts": null,
   "cash_count": null,
@@ -367,6 +380,7 @@ Argent mis dans le tiroir ou retiré hors vente (achat de fournitures, dépôt e
   "amount": 5000,
   "reason": "Achat de sacs plastique",
   "created_by": "u_12",
+  "approved_by": "u_3",
   "created_at": "2026-11-12T11:15:00Z"
 }
 ```
@@ -375,6 +389,7 @@ Règles :
 
 - **Idempotent** : même `id` déjà reçu → `200` avec `"status": "duplicate"`.
 - `type` ∈ `in` (entrée), `out` (sortie). `amount` : entier > 0. `reason` : obligatoire, non vide, 200 caractères au plus. Sinon `400`.
+- `approved_by` : le responsable qui a autorisé une sortie faite par un caissier (§11), ou `null`.
 - Session inconnue → `422 SESSION_UNKNOWN`. Session déjà clôturée : le mouvement est **accepté** et signalé (`session_closed: true`), comme une vente.
 
 Réponse `201` (ou `200` si déjà reçu) :
@@ -388,6 +403,7 @@ Réponse `201` (ou `200` si déjà reçu) :
 ```json
 {
   "closed_by": "u_12",
+  "approved_by": null,
   "closed_at": "2026-11-12T20:30:00Z",
   "counts": [
     { "method": "cash",   "expected": 57000, "counted": 56000, "difference": -1000 },
@@ -417,7 +433,8 @@ Règles :
   - La somme des `value × quantity` doit être égale au `counted` des espèces. Sinon `422 CASH_COUNT_MISMATCH`.
   - La liste des billets et pièces est choisie par la caisse : l'API accepte toute valeur positive.
 - `closing_note` est obligatoire dès qu'un écart est différent de 0 (`422 CLOSING_NOTE_REQUIRED`). Elle est facultative sinon (`null`). 200 caractères au plus.
-- **Seuil d'écart** : si l'écart d'un moyen de paiement dépasse, en valeur absolue, le `closing_difference_threshold` du magasin (§2), la caisse ne laisse valider la clôture qu'à un `manager` ou un `admin`. L'API ne refait pas ce contrôle et enregistre la clôture telle quelle, car le seuil a pu changer depuis une clôture faite hors ligne.
+- **Seuil d'écart** : si l'écart d'un moyen de paiement dépasse, en valeur absolue, le `closing_difference_threshold` du magasin (§2), la caisse ne laisse valider la clôture qu'à un `manager` ou un `admin`, ou à un caissier avec l'autorisation d'un responsable (`approved_by`, §11). L'API ne refait pas ce contrôle et enregistre la clôture telle quelle, car le seuil a pu changer depuis une clôture faite hors ligne.
+- `approved_by` : le responsable qui a autorisé la clôture d'un caissier au-delà du seuil (§11), ou `null`.
 - Les montants `expected` sont calculés par la caisse (formules ci-dessous). L'API les recalcule avec ce qu'elle a reçu. Si l'un d'eux diffère (par exemple pour une vente encore refusée sur la caisse), l'API **accepte la clôture** et la signale (`expected_mismatch: true`) : la clôture a eu lieu, l'écart est à examiner au back-office.
 
 Réponse `200` :
@@ -475,6 +492,7 @@ L'exemple ci-dessous reprend celui du §7 : 1 des 3 jus vendus à 10 DH, sur une
   "session_id": "3b9d6c1e-8f2a-4d5b-9c7e-1a2b3c4d5e6f",
   "original_sale_id": "0f8b7c2e-5c1d-4c6e-9a4b-2f1e3d4c5b6a",
   "cashier_id": "u_12",
+  "approved_by": "u_3",
   "customer_id": null,
   "created_at": "2026-11-12T16:05:00Z",
   "reason": "defective",
@@ -508,6 +526,7 @@ Règles :
   - Vente d'un autre magasin que `store_id` → `422 STORE_MISMATCH` : un article se retourne dans le magasin où il a été acheté.
 - `session_id` : la session ouverte au moment du retour, avec les mêmes règles que pour une vente (§5) : `SESSION_MISMATCH`, `SESSION_UNKNOWN`, et `session_closed: true` si elle est déjà clôturée.
 - `customer_id` : le client de la vente d'origine, repris tel quel (`null` s'il n'y en a pas). Sinon `422 CUSTOMER_MISMATCH`.
+- `approved_by` : le responsable qui a autorisé un retour fait par un caissier (§11), ou `null`.
 - `reason` ∈ `defective` (défectueux), `cashier_error` (erreur de caisse), `changed_mind` (changement d'avis), `other` (autre).
   - `reason_text` est obligatoire pour `other`, facultatif (`null`) sinon. 200 caractères au plus. Sinon `400`.
 - `lines` : au moins une ligne. Chaque ligne de la vente d'origine apparaît au plus une fois. Sinon `400`.
@@ -536,3 +555,61 @@ Réponse `201` (ou `200` si déjà reçu) :
 ```
 
 Hors ligne, le retour part dans la file de la caisse, dans l'ordre, comme les ventes (§9, « Envoi hors ligne »). Pour calculer ce qui reste à retourner, la caisse compte les retours connus de l'API et ses propres retours encore dans la file.
+
+## 11. Autorisation d'un responsable
+
+Certaines opérations faites par un utilisateur `cashier` demandent l'accord d'un responsable : un `manager` ou un `admin` rattaché au magasin, qui tape son code PIN sur la caisse. Un `manager` ou un `admin` connecté fait ces opérations sans autorisation.
+
+| Opération faite par un caissier | Qui l'a autorisée est enregistré dans |
+|---|---|
+| Vente avec une remise au-delà du plafond du magasin (§2) | `approved_by` de la vente (§5) |
+| Retour, quel qu'il soit | `approved_by` du retour (§10) |
+| Sortie d'espèces | `approved_by` du mouvement (§9) |
+| Clôture avec un écart au-delà du seuil du magasin | `approved_by` de la clôture (§9) |
+| Suppression d'une vente en attente | rien n'est envoyé : les ventes en attente restent sur la caisse (§6) |
+
+`approved_by` est l'`id` du responsable, ou `null` quand l'opération n'a pas demandé d'autorisation. Les opérations envoyées avant la version 0.6 n'ont pas ce champ : l'API le prend pour `null`. L'API l'enregistre tel quel et ne refait pas les contrôles, car le plafond, le seuil ou les responsables ont pu changer depuis une opération faite hors ligne. Si ce n'est pas l'`id` d'un responsable du magasin, l'API accepte quand même l'opération (elle a eu lieu) et la signale au back-office.
+
+### Plafond de remise
+
+- La remise d'une ligne se compare à `round(quantity × unit_price_ttc)`.
+- La remise globale se compare au total des lignes après leurs remises, plus les autres charges.
+- Une remise dépasse le plafond si elle est supérieure à `cashier_max_discount_percent` % de cette base, ou supérieure à `cashier_max_discount`. Une remise égale au plafond ne demande rien.
+- La caisse fait ce contrôle au moment du paiement, sur le panier tel qu'il est payé : une seule autorisation couvre la vente.
+
+### `GET /api/stores/{store_id}/approvers`
+
+Les responsables qui peuvent autoriser une opération dans ce magasin, avec l'empreinte de leur PIN, pour que la caisse vérifie le PIN même hors ligne. Ouvert à tout utilisateur rattaché au magasin, car c'est la caisse d'un caissier qui en a besoin. Magasin qui n'est pas dans ceux de l'utilisateur → `403 FORBIDDEN`.
+
+```json
+{
+  "approvers": [
+    {
+      "user_id": "u_3",
+      "name": "Responsable",
+      "pin": {
+        "algorithm": "PBKDF2-SHA256",
+        "iterations": 600000,
+        "salt": "c2VsLWFsZWF0b2lyZS0xNg==",
+        "hash": "ZW1wcmVpbnRlLWR1LXBpbi1zdXItMzItb2N0ZXRzLi4u"
+      }
+    }
+  ]
+}
+```
+
+Règles :
+
+- La liste contient seulement les `manager` et `admin` rattachés au magasin qui ont un PIN. Elle est complète à chaque appel : un responsable retiré, ou qui n'a plus de PIN, n'y figure plus.
+- Le PIN est fixé dans le back-office (§8, point 10), différent du mot de passe. Il n'est jamais envoyé en clair, ni par la caisse ni par l'API.
+- `pin` est l'empreinte PBKDF2 (HMAC-SHA-256) du PIN encodé en UTF-8 :
+  - `salt` : 16 octets aléatoires, propres au responsable et renouvelés à chaque changement de PIN, en base64 ;
+  - `iterations` : entier ≥ 100 000 choisi par l'API (600 000 recommandé) ;
+  - `hash` : les 32 octets obtenus, en base64.
+- La caisse appelle cet endpoint à la connexion et à chaque synchronisation du catalogue, et garde la liste pour le hors ligne. Un PIN changé ou un responsable retiré reste donc valable sur une caisse hors ligne jusqu'à sa synchronisation suivante.
+
+### Vérification sur la caisse
+
+- On choisit le responsable dans la liste, puis il tape son PIN. La caisse calcule l'empreinte et la compare à celle de la liste.
+- Après 3 PIN faux de suite sur la caisse, plus aucun essai n'est possible pendant 1 minute.
+- Ce contrôle est fait par la caisse seule. Quelqu'un qui accède aux données du poste peut lire les empreintes et chercher les PIN hors de la caisse. Ce risque est accepté et détaillé dans `docs/SECURITE.md`. Il est réduit par un PIN de 6 chiffres, le nombre d'itérations et le suivi des `approved_by` au back-office.
