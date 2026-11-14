@@ -51,9 +51,12 @@ export function clearSession(storage = browserStorage()) {
 const isUser = (v: unknown): v is User =>
   isRecord(v) && isId(v.id) && typeof v.name === 'string' && ['admin', 'manager', 'cashier'].includes(v.role as string);
 const isRegister = (v: unknown): v is Register => isRecord(v) && isId(v.id) && typeof v.name === 'string';
+const isThreshold = (v: unknown) => Number.isSafeInteger(v) && (v as number) >= 0;
 const isStore = (v: unknown): v is Store =>
-  isRecord(v) && isId(v.id) && typeof v.name === 'string' && Array.isArray(v.registers) && v.registers.every(isRegister);
-const isAuth = (v: unknown): v is Auth =>
+  isRecord(v) && isId(v.id) && typeof v.name === 'string' && isThreshold(v.closing_difference_threshold)
+  && Array.isArray(v.registers) && v.registers.every(isRegister);
+/** Réponse du login (§2) complète et utilisable : vérifiée à la connexion et à chaque relecture. */
+export const isAuth = (v: unknown): v is Auth =>
   isRecord(v) && isId(v.token) && isUser(v.user) && Array.isArray(v.stores) && v.stores.every(isStore);
 
 /** Session sauvegardée, vérifiée champ par champ : rien d'utilisable → null (retour au login). */
@@ -67,4 +70,16 @@ export function loadSession(storage = browserStorage()): Auth | Session | null {
   if (!isAuth(saved)) return null;
   const { storeId, registerId } = saved as Partial<Session>;
   return selectRegister(saved, storeId, registerId);
+}
+
+/** Noms du magasin et de la caisse choisis (l'identifiant de la caisse si son nom manque). */
+export function placeOf(session: Session): { storeName: string; registerName: string } {
+  const store = session.stores.find((s) => s.id === session.storeId);
+  const register = store?.registers.find((r) => r.id === session.registerId);
+  return { storeName: store?.name ?? '', registerName: register?.name ?? session.registerId };
+}
+
+/** Écart de clôture autorisé dans le magasin choisi (§2) : au-delà, un caissier ne clôture pas seul. */
+export function closingThreshold(session: Session): number {
+  return session.stores.find((s) => s.id === session.storeId)?.closing_difference_threshold ?? 0;
 }

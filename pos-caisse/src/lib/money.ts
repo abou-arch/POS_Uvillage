@@ -7,5 +7,13 @@ export function parseMad(text: string): number | null {
   return Math.round(Number(t) * 100);
 }
 
+/** Comme parseMad, avec un signe moins possible : total du terminal de carte quand les retours dépassent les ventes (§9). */
+export function parseSignedMad(text: string): number | null {
+  const t = text.replace(/\s/g, '');
+  if (!t.startsWith('-')) return parseMad(t);
+  const cents = parseMad(t.slice(1));
+  return cents === null ? null : -cents;
+}
+
 /** Centimes → texte d'un champ de saisie : 1250 → « 12,50 ». */
 export const madInput = (cents: number) => (cents / 100).toFixed(2).replace('.', ',');

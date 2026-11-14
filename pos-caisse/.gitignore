@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# État de la fausse API (ventes, sessions de caisse reçues)
+mock-api/state.json

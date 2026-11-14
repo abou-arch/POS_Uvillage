@@ -7,11 +7,12 @@ const pain: CartLine = { product_id: 'p_1', name: 'PAIN NORMAL', quantity: 2, un
 const thon: CartLine = { product_id: 'p_9', name: 'THON ISABEL TOMATE', quantity: 1, unit_price_ttc: 1000, discount: 0, tva_rate: 20, stock: 20 };
 const ahmed: Customer = { id: 'c_1', name: 'Ahmed', phone: '+212600000001', matricule: '2023001542' };
 const cash = (amount: number): Payment => ({ method: 'cash', amount });
+const LINE_IDS = ['5d2e8f1a-7b3c-4e9d-8a6f-1c2b3d4e5f60', 'a3c5e7f9-1b2d-4f6a-8c0e-2d4f6a8c0e1b', 'c1d2e3f4-a5b6-4c7d-8e9f-0a1b2c3d4e5f'];
 
 function input(cart: Partial<CartState>, payments: Payment[], amountReceived: number): SaleInput {
   return {
-    cart: { ...emptyCart, ...cart }, storeId: 'st_2', registerId: 'reg_3', cashierId: 'u_2', payments, amountReceived,
-    id: '0f8b7c2e-5c1d-4c6e-9a4b-2f1e3d4c5b6a', counter: 7, now: new Date('2026-10-05T14:32:10.123Z'),
+    cart: { ...emptyCart, ...cart }, storeId: 'st_2', registerId: 'reg_3', sessionId: '3b9d6c1e-8f2a-4d5b-9c7e-1a2b3c4d5e6f', cashierId: 'u_2', payments, amountReceived,
+    id: '0f8b7c2e-5c1d-4c6e-9a4b-2f1e3d4c5b6a', lineIds: (cart.lines ?? []).map((_, i) => LINE_IDS[i]), counter: 7, now: new Date('2026-10-05T14:32:10.123Z'),
   };
 }
 
@@ -20,15 +21,22 @@ describe('construction de la vente (§5 du contrat)', () => {
     const sale = buildSale(input({ lines: [pain, thon] }, [cash(1300)], 2000));
     expect(sale).toMatchObject({
       id: '0f8b7c2e-5c1d-4c6e-9a4b-2f1e3d4c5b6a', number: 'ST2-REG3-000007', store_id: 'st_2', register_id: 'reg_3',
-      cashier_id: 'u_2', customer_id: null, created_at: '2026-10-05T14:32:10Z', other_charges: 0, global_discount: 0,
+      session_id: '3b9d6c1e-8f2a-4d5b-9c7e-1a2b3c4d5e6f', cashier_id: 'u_2', customer_id: null, created_at: '2026-10-05T14:32:10Z', other_charges: 0, global_discount: 0,
       totals: { ht: 1133, tva: 167, ttc: 1300 }, payments: [cash(1300)], amount_received: 2000, change_given: 700,
       send_sms: false, status: 'completed',
     });
     expect(sale.lines).toEqual([
-      { product_id: 'p_1', name: 'PAIN NORMAL', quantity: 2, unit_price_ttc: 150, discount: 0, tva_rate: 0, total_ht: 300, total_tva: 0, total_ttc: 300 },
-      { product_id: 'p_9', name: 'THON ISABEL TOMATE', quantity: 1, unit_price_ttc: 1000, discount: 0, tva_rate: 20, total_ht: 833, total_tva: 167, total_ttc: 1000 },
+      { id: LINE_IDS[0], product_id: 'p_1', name: 'PAIN NORMAL', quantity: 2, unit_price_ttc: 150, discount: 0, tva_rate: 0, total_ht: 300, total_tva: 0, total_ttc: 300 },
+      { id: LINE_IDS[1], product_id: 'p_9', name: 'THON ISABEL TOMATE', quantity: 1, unit_price_ttc: 1000, discount: 0, tva_rate: 20, total_ht: 833, total_tva: 167, total_ttc: 1000 },
     ]);
     expect(sale.lines[0]).not.toHaveProperty('stock');
+  });
+  it('chaque ligne a son propre id, même pour le même article (contrat 0.5)', () => {
+    const sale = buildSale(input({ lines: [pain, { ...pain, discount: 50 }] }, [cash(550)], 550));
+    expect(sale.lines.map((l) => l.id)).toEqual([LINE_IDS[0], LINE_IDS[1]]);
+    expect(() => buildSale({ ...input({ lines: [pain, thon] }, [cash(1300)], 1300), lineIds: [LINE_IDS[0]] })).toThrow('Identifiants de lignes');
+    expect(() => buildSale({ ...input({ lines: [pain, thon] }, [cash(1300)], 1300), lineIds: [LINE_IDS[0], LINE_IDS[0]] }))
+      .toThrow('Identifiants de lignes');
   });
   it('remise de ligne', () => {
     const sale = buildSale(input({ lines: [{ ...thon, discount: 100 }] }, [cash(900)], 900));
@@ -55,6 +63,9 @@ describe('construction de la vente (§5 du contrat)', () => {
     expect(() => buildSale(input({ lines: [thon] }, [cash(1000)], 500))).toThrow(/Il manque/);
     expect(() => buildSale(input({ lines: [thon] }, [cash(800)], 800))).toThrow(/Reste à payer/);
     expect(() => buildSale(input({ lines: [thon] }, [{ method: 'credit', amount: 1000 }], 0))).toThrow(/demande un client/);
+  });
+  it('refuse une vente hors session de caisse (§9)', () => {
+    expect(() => buildSale({ ...input({ lines: [thon] }, [cash(1000)], 1000), sessionId: '' })).toThrow('Aucune session de caisse ouverte.');
   });
 });
 

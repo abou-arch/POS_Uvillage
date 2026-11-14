@@ -1,5 +1,8 @@
 // Client HTTP de la caisse. Seul fichier à modifier pour pointer vers la vraie API (VITE_API_URL).
-import type { Auth, Brand, Category, Customer, Product, Sale } from '../types';
+import type {
+  Auth, Brand, CashMovement, CashSession, CashSessionClosing, CashSessionOpening, Category, Customer, Product, Refund, Sale,
+  SaleLookup,
+} from '../types';
 
 const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:4000/api';
 const TIMEOUT_MS = 10_000; // la caisse ne doit pas rester bloquée quand le réseau ne répond plus
@@ -80,4 +83,19 @@ export const api = {
     request<{ id: string; status: string; stock_warning: boolean }>('/sales', { method: 'POST', body: JSON.stringify(sale) }),
   syncSales: (sales: Sale[]) =>
     request<{ results: { id: string; status: string }[] }>('/sales/batch', { method: 'POST', body: JSON.stringify({ sales }) }),
+  // Retours (§5 et §10)
+  saleByNumber: (number: string) => request<SaleLookup>(`/sales/by-number/${encodeURIComponent(number)}`),
+  createRefund: (refund: Refund) =>
+    request<{ id: string; status: string; session_closed?: boolean }>('/refunds', { method: 'POST', body: JSON.stringify(refund) }),
+  // Sessions de caisse (§9)
+  currentCashSession: (registerId: string) =>
+    request<{ session: CashSession | null }>(`/cash-sessions/current?register_id=${encodeURIComponent(registerId)}`),
+  openCashSession: (opening: CashSessionOpening) =>
+    request<{ id: string; status: string }>('/cash-sessions', { method: 'POST', body: JSON.stringify(opening) }),
+  addCashMovement: (movement: CashMovement) =>
+    request<{ id: string; status: string; session_closed?: boolean }>('/cash-movements', { method: 'POST', body: JSON.stringify(movement) }),
+  closeCashSession: (sessionId: string, closing: CashSessionClosing) =>
+    request<{ id: string; status: string; expected_mismatch?: boolean }>(
+      `/cash-sessions/${encodeURIComponent(sessionId)}/close`, { method: 'POST', body: JSON.stringify(closing) },
+    ),
 };

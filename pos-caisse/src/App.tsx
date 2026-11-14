@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { apiConfigError, setToken, setUnauthorizedHandler } from './api/client';
+import { CashRegister } from './components/CashRegister';
 import { Login } from './components/Login';
-import { PosScreen } from './components/PosScreen';
 import { StorePicker } from './components/StorePicker';
 import { forgetCustomers } from './db/customers';
 import { db } from './db/db';
@@ -19,17 +19,17 @@ export default function App() {
   const [session, setSession] = useState<Auth | Session | null>(restored);
   const [notice, setNotice] = useState<string | null>(null);
 
-  // Token refusé par l'API (expiré, ou fausse API relancée) : retour au login. Les ventes à envoyer restent
-  // dans l'outbox (rien n'est effacé à la déconnexion) et repartent dès la reconnexion.
+  // Token refusé par l'API (expiré, ou fausse API relancée) : retour au login. Les opérations à envoyer (ventes,
+  // session de caisse) restent dans l'outbox (rien n'est effacé à la déconnexion) et repartent dès la reconnexion.
   useEffect(() => {
     setUnauthorizedHandler(() => {
       clearSession();
       setToken(null);
       setSession(null);
-      setNotice('Session expirée, reconnectez-vous.');
+      setNotice('Connexion expirée, reconnectez-vous.');
       db.outbox.count().then((n) => {
-        if (n === 1) setNotice('Session expirée, reconnectez-vous : la vente gardée sur la caisse partira ensuite.');
-        if (n > 1) setNotice(`Session expirée, reconnectez-vous : les ${n} ventes gardées sur la caisse partiront ensuite.`);
+        if (n === 1) setNotice('Connexion expirée, reconnectez-vous : l’opération gardée sur la caisse partira ensuite.');
+        if (n > 1) setNotice(`Connexion expirée, reconnectez-vous : les ${n} opérations gardées sur la caisse partiront ensuite.`);
       }).catch(() => {});
     });
     return () => setUnauthorizedHandler(null);
@@ -68,5 +68,5 @@ export default function App() {
     return <StorePicker auth={session} onLogout={logout}
       onSelect={(storeId, registerId) => update(selectRegister(session, storeId, registerId))} />;
   }
-  return <PosScreen key={session.registerId} session={session} onLogout={logout} />;
+  return <CashRegister key={session.registerId} session={session} onLogout={logout} />;
 }

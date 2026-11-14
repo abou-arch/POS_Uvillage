@@ -15,6 +15,7 @@ React 19 + TypeScript + Vite. Fausse API Express dans mock-api/ (port 4000). Tes
 - Interface en français, libellés articles FR + AR possibles.
 - Après chaque changement : npm run build et npm test doivent passer. Ajoute des tests pour toute logique métier.
 - Pas de nouvelle dépendance sans me demander, sauf celles nommées dans mon prompt.
+- Ne jamais copier de code d'un autre POS (Odoo ou autre) : s'inspirer uniquement de son fonctionnement et écrire notre propre code. Ne jamais lire ni utiliser le code d'Odoo Enterprise.
 
 ## Commandes
 npm run dev:all · npm run mock · npm test · npm run build

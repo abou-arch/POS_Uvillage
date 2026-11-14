@@ -8,10 +8,12 @@ export interface SaleInput {
   cart: CartState;
   storeId: string;
   registerId: string;
+  sessionId: string; // session de caisse ouverte (§9)
   cashierId: string;
   payments: Payment[];
   amountReceived: number; // espèces remises par le client ; le rendu en découle
   id: string; // UUID v4 généré par la caisse
+  lineIds: string[]; // un UUID v4 par ligne du panier, dans l'ordre (§5) : un retour vise ainsi une ligne précise
   counter: number; // compteur de tickets de cette caisse
   now: Date;
 }
@@ -26,16 +28,20 @@ export function ticketNumber(storeId: string, registerId: string, counter: numbe
 export function buildSale(input: SaleInput): Sale {
   const { cart, payments, amountReceived } = input;
   if (cart.lines.length === 0) throw new Error('Le panier est vide.');
+  if (!input.sessionId) throw new Error('Aucune session de caisse ouverte.');
+  if (input.lineIds.length !== cart.lines.length || new Set(input.lineIds).size !== cart.lines.length) {
+    throw new Error('Identifiants de lignes invalides.');
+  }
   const totals = saleTotals(cart.lines, cart.otherCharges, cart.globalDiscount);
   const cashPaid = payments.filter((p) => p.method === 'cash').reduce((s, p) => s + p.amount, 0);
   const error = paymentsError(totals.ttc, payments, cart.customer !== null)
     ?? (cashPaid > 0 ? cashError(cashPaid, amountReceived) : null);
   if (error) throw new Error(error);
 
-  const lines: SaleLine[] = cart.lines.map((l) => {
+  const lines: SaleLine[] = cart.lines.map((l, i) => {
     const t = lineTotals(l.quantity, l.unit_price_ttc, l.discount, l.tva_rate);
     return {
-      product_id: l.product_id, name: l.name, quantity: l.quantity, unit_price_ttc: l.unit_price_ttc,
+      id: input.lineIds[i], product_id: l.product_id, name: l.name, quantity: l.quantity, unit_price_ttc: l.unit_price_ttc,
       discount: l.discount, tva_rate: l.tva_rate, total_ht: t.ht, total_tva: t.tva, total_ttc: t.ttc,
     };
   });
@@ -45,6 +51,7 @@ export function buildSale(input: SaleInput): Sale {
     number: ticketNumber(input.storeId, input.registerId, input.counter),
     store_id: input.storeId,
     register_id: input.registerId,
+    session_id: input.sessionId,
     cashier_id: input.cashierId,
     customer_id: cart.customer?.id ?? null,
     created_at: input.now.toISOString().replace(/\.\d{3}Z$/, 'Z'), // « 2026-10-05T14:32:10Z » comme le contrat

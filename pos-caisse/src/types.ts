@@ -4,7 +4,8 @@ export type Role = 'admin' | 'manager' | 'cashier';
 
 export interface User { id: string; name: string; role: Role }
 export interface Register { id: string; name: string }
-export interface Store { id: string; name: string; registers: Register[] }
+/** closing_difference_threshold : écart de clôture autorisé dans ce magasin, en centimes (§2, §9). */
+export interface Store { id: string; name: string; closing_difference_threshold: number; registers: Register[] }
 
 // Réponse de POST /auth/login : connecté, magasin et caisse pas encore choisis.
 export interface Auth { token: string; user: User; stores: Store[] }
@@ -52,6 +53,8 @@ export type PaymentMethod = 'cash' | 'card' | 'mobile' | 'credit';
 export interface Payment { method: PaymentMethod; amount: number }
 
 export interface SaleLine extends Omit<CartLine, 'stock'> {
+  /** UUID v4 de la ligne (contrat 0.5). Absent des ventes plus anciennes : leurs lignes se repèrent par leur position. */
+  id?: string;
   total_ht: number;
   total_tva: number;
   total_ttc: number;
@@ -62,6 +65,7 @@ export interface Sale {
   number: string;
   store_id: string;
   register_id: string;
+  session_id: string; // session de caisse ouverte au moment de la vente (§9)
   cashier_id: string;
   customer_id: string | null;
   created_at: string;
@@ -74,4 +78,101 @@ export interface Sale {
   change_given: number;
   send_sms: boolean;
   status: 'completed' | 'cancelled';
+}
+
+// Session de caisse (§9) : ouverte avec un fond de caisse, clôturée en comptant chaque moyen de paiement.
+
+/** Ce que la caisse envoie à l'ouverture (POST /api/cash-sessions). */
+export interface CashSessionOpening {
+  id: string;
+  store_id: string;
+  register_id: string;
+  opened_by: string;
+  opened_at: string;
+  opening_cash: number;
+  opening_note: string | null;
+}
+
+/** Moyens de paiement comptés à la clôture : le crédit n'est pas de l'argent reçu. */
+export type CountedMethod = Exclude<PaymentMethod, 'credit'>;
+
+/** Attendu, compté et écart d'un moyen de paiement. difference = compté − attendu : négatif = il manque de l'argent. */
+export interface MethodCount { method: CountedMethod; expected: number; counted: number; difference: number }
+
+/** Une ligne du comptage des espèces : valeur du billet ou de la pièce (centimes) et nombre compté. */
+export interface CashCountLine { value: number; quantity: number }
+
+/** Ce que la caisse envoie à la clôture (POST /api/cash-sessions/{id}/close). */
+export interface CashSessionClosing {
+  closed_by: string;
+  closed_at: string;
+  counts: MethodCount[]; // cash, card, mobile : une fois chacun
+  cash_count: CashCountLine[] | null; // null : total des espèces saisi directement
+  closing_note: string | null;
+}
+
+/** Objet session renvoyé par l'API (GET /api/cash-sessions/current) : champs de clôture à null tant qu'elle est ouverte. */
+export interface CashSession extends CashSessionOpening {
+  status: 'open' | 'closed';
+  closed_by: string | null;
+  closed_at: string | null;
+  counts: MethodCount[] | null;
+  cash_count: CashCountLine[] | null;
+  closing_note: string | null;
+}
+
+export type CashMovementType = 'in' | 'out';
+
+/** Entrée ou sortie d'espèces hors vente (POST /api/cash-movements). */
+export interface CashMovement {
+  id: string;
+  session_id: string;
+  type: CashMovementType;
+  amount: number;
+  reason: string;
+  created_by: string;
+  created_at: string;
+}
+
+// Retours et remboursements (§10) : un document à part, la vente d'origine n'est pas modifiée.
+
+export type RefundReason = 'defective' | 'cashier_error' | 'changed_mind' | 'other';
+
+/** Une ligne retournée : la ligne d'origine (position et id), la quantité et le montant rendu (§7). */
+export interface RefundLine {
+  original_line_id: string | null; // null pour une vente d'avant le contrat 0.5
+  line_index: number;
+  product_id: string;
+  name: string;
+  quantity: number;
+  unit_price_ttc: number;
+  tva_rate: number;
+  total_ht: number;
+  total_tva: number;
+  total_ttc: number;
+}
+
+/** Ce que la caisse envoie (POST /api/refunds). */
+export interface Refund {
+  id: string;
+  number: string;
+  store_id: string;
+  register_id: string;
+  session_id: string;
+  original_sale_id: string;
+  cashier_id: string;
+  customer_id: string | null;
+  created_at: string;
+  reason: RefundReason;
+  reason_text: string | null;
+  lines: RefundLine[];
+  totals: { ht: number; tva: number; ttc: number };
+  payments: Payment[];
+}
+
+/** Réponse de GET /api/sales/by-number/{number} (§5). */
+export interface SaleLookup {
+  sale: Sale;
+  customer: { id: string; name: string } | null;
+  refunds: Refund[];
 }

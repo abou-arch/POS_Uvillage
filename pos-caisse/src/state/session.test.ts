@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { Auth, Session, Store } from '../types';
 import {
-  autoSelection, clearSession, initialStore, isSession, loadSession, onlyRegister, saveSession, selectRegister, SESSION_KEY,
+  autoSelection, clearSession, closingThreshold, initialStore, isAuth, isSession, loadSession, onlyRegister, saveSession, selectRegister, SESSION_KEY,
 } from './session';
 
-const centre: Store = { id: 'st_1', name: 'Magasin centre', registers: [{ id: 'reg_1', name: 'Caisse 1' }, { id: 'reg_2', name: 'Caisse 2' }] };
-const quartier: Store = { id: 'st_2', name: 'Magasin quartier', registers: [{ id: 'reg_3', name: 'Caisse 1' }] };
-const sansCaisse: Store = { id: 'st_3', name: 'Magasin vide', registers: [] };
+const centre: Store = { id: 'st_1', name: 'Magasin centre', closing_difference_threshold: 2000, registers: [{ id: 'reg_1', name: 'Caisse 1' }, { id: 'reg_2', name: 'Caisse 2' }] };
+const quartier: Store = { id: 'st_2', name: 'Magasin quartier', closing_difference_threshold: 2000, registers: [{ id: 'reg_3', name: 'Caisse 1' }] };
+const sansCaisse: Store = { id: 'st_3', name: 'Magasin vide', closing_difference_threshold: 0, registers: [] };
 const auth = (...stores: Store[]): Auth => ({ token: 'tok_1', user: { id: 'u_1', name: 'Falcon', role: 'admin' }, stores });
 
 // localStorage en mémoire : pas de navigateur sous Vitest.
@@ -80,6 +80,9 @@ describe('conservation de la session (F5)', () => {
       JSON.stringify({ ...valid, stores: 'st_1' }),
       JSON.stringify({ ...valid, user: { ...valid.user, role: 'pirate' } }),
       JSON.stringify({ ...valid, stores: [{ id: 'st_1', name: 'Magasin', registers: [{ name: 'Caisse sans id' }] }] }),
+      JSON.stringify({ ...valid, stores: [{ id: 'st_1', name: 'Magasin', registers: [] }] }), // sans seuil d'écart (§2)
+      JSON.stringify({ ...valid, stores: [{ ...centre, closing_difference_threshold: -1 }] }),
+      JSON.stringify({ ...valid, stores: [{ ...centre, closing_difference_threshold: 10.5 }] }),
     ];
     for (const raw of bad) expect(loadSession(memoryStorage({ [SESSION_KEY]: raw }))).toBeNull();
   });
@@ -96,5 +99,14 @@ describe('conservation de la session (F5)', () => {
     expect(() => saveSession(auth(quartier), broken)).not.toThrow();
     expect(() => clearSession(broken)).not.toThrow();
     expect(loadSession(broken)).toBeNull();
+  });
+});
+
+describe('seuil d’écart de clôture (§2)', () => {
+  it('lu dans la réponse du login, pour le magasin choisi', () => {
+    const session = selectRegister(auth({ ...centre, closing_difference_threshold: 5000 }, quartier), 'st_1', 'reg_2');
+    expect(isSession(session) && closingThreshold(session)).toBe(5000);
+    expect(isAuth(auth(centre))).toBe(true);
+    expect(isAuth({ ...auth(centre), stores: [{ id: 'st_1', name: 'Magasin centre', registers: [] }] })).toBe(false);
   });
 });

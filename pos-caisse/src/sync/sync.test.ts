@@ -1,13 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { api } from '../api/client';
 import { matchesCustomer } from '../db/customers';
+import { buildRefund, defaultRefundPayments, refundLines, refundTotals, returnableLines } from '../lib/buildRefund';
 import { buildSale } from '../lib/buildSale';
+import { buildClosing, buildMovement, buildOpening } from '../lib/cashSession';
 import { emptyCart } from '../state/cart';
-import type { Product, Sale } from '../types';
+import type { CashMovement, CashSessionClosing, CashSessionOpening, Product, Refund, Sale } from '../types';
 import {
-  catalogChanges, createSyncLoop, flushOutbox, MAX_DELAY_MS, nextCursor, nextDelay, pendingQuantities,
-  SYNC_INTERVAL_MS, type OutboxItem, type OutboxStore, type Timers,
+  apiSenders, catalogChanges, closeKey, createSyncLoop, describeItem, flushOutbox, isOutboxItem, itemSession,
+  MAX_DELAY_MS, nextCursor, nextDelay, pendingQuantities, SYNC_INTERVAL_MS, type OutboxItem, type OutboxStore, type Timers,
 } from './sync';
+
+const SESSION = '3b9d6c1e-8f2a-4d5b-9c7e-1a2b3c4d5e6f';
 
 // --- Une caisse et un serveur simulés ---------------------------------------------------------------
 
@@ -16,54 +19,117 @@ function sale(quantity = 1, productId = 'p_1'): Sale {
   counter += 1;
   return buildSale({
     cart: { ...emptyCart, lines: [{ product_id: productId, name: 'PAIN', quantity, unit_price_ttc: 150, discount: 0, tva_rate: 0, stock: 99 }] },
-    storeId: 'st_2', registerId: 'reg_3', cashierId: 'u_2',
+    storeId: 'st_2', registerId: 'reg_3', sessionId: '3b9d6c1e-8f2a-4d5b-9c7e-1a2b3c4d5e6f', cashierId: 'u_2',
     payments: [{ method: 'cash', amount: Math.round(quantity * 150) }], amountReceived: Math.round(quantity * 150),
     id: `00000000-0000-4000-8000-${String(counter).padStart(12, '0')}`, counter, now: new Date('2026-10-22T10:00:00Z'),
+    lineIds: [`10000000-0000-4000-8000-${String(counter).padStart(12, '0')}`],
   });
 }
 
-function memoryOutbox(sales: Sale[]): OutboxStore & { items: OutboxItem[] } {
+const item = (s: Sale, error: string | null = null): OutboxItem => ({ kind: 'sale', id: s.id, sale: s, error });
+
+function memoryOutbox(entries: (Sale | OutboxItem)[]): OutboxStore & { items: OutboxItem[] } {
   const store = {
-    items: sales.map((s): OutboxItem => ({ sale: s, error: null })),
+    items: entries.map((e): OutboxItem => ('kind' in e ? e : item(e))),
     list: async () => store.items.map((i) => ({ ...i })),
-    remove: async (ids: string[]) => { store.items = store.items.filter((i) => !ids.includes(i.sale.id)); },
+    remove: async (ids: string[]) => { store.items = store.items.filter((i) => !ids.includes(i.id)); },
     markError: async (errors: { id: string; error: string }[]) => {
-      for (const e of errors) store.items = store.items.map((i) => (i.sale.id === e.id ? { ...i, error: e.error } : i));
+      for (const e of errors) store.items = store.items.map((i) => (i.id === e.id ? { ...i, error: e.error } : i));
     },
   };
   return store;
 }
 
+// Opérations de session (§9), comme la caisse les met en file.
+let ids = 0;
+const nextId = () => `00000000-0000-4000-9000-${String((ids += 1)).padStart(12, '0')}`;
+const now = new Date('2026-11-12T08:00:00Z');
+function openingOp(sessionId = SESSION): OutboxItem & { opening: CashSessionOpening } {
+  const opening = buildOpening({ id: sessionId, storeId: 'st_2', registerId: 'reg_3', openedBy: 'u_2', openingCash: 50000, note: '', now });
+  return { kind: 'session_open', id: sessionId, opening, error: null };
+}
+function movementOp(amount = 5000): OutboxItem & { movement: CashMovement } {
+  const movement = buildMovement({ id: nextId(), sessionId: SESSION, type: 'out', amount, reason: 'Achat de sacs', createdBy: 'u_2', available: 1e6, now });
+  return { kind: 'cash_movement', id: movement.id, movement, error: null };
+}
+/** Retour de `quantity` articles de la première ligne d'une vente, remboursé comme proposé. */
+function refundOp(original: Sale, quantity = 1): OutboxItem & { refund: Refund } {
+  const quantities = new Map([[0, quantity]]);
+  const total = refundTotals(refundLines(returnableLines(original, []), quantities)).ttc;
+  const refund = buildRefund({
+    sale: original, refunds: [], quantities, reason: 'defective', reasonText: '', payments: defaultRefundPayments(original, [], total),
+    cashAvailable: 1e6, storeId: 'st_2', registerId: 'reg_3', sessionId: SESSION, cashierId: 'u_2', id: nextId(), counter: 1, now,
+  });
+  return { kind: 'refund', id: refund.id, refund, error: null };
+}
+function closeOp(sessionId = SESSION): OutboxItem & { closing: CashSessionClosing } {
+  const closing = buildClosing({
+    counted: { cash: 56000, card: 8000, mobile: 0 }, expected: { cash: 57000, card: 8000, mobile: 0 }, cashCount: null,
+    note: 'Erreur de rendu', role: 'cashier', threshold: 2000, closedBy: 'u_2', now,
+  });
+  return { kind: 'session_close', id: closeKey(sessionId), session_id: sessionId, closing, error: null };
+}
+
 /**
- * fetch simulé pour POST /api/sales/batch : le serveur garde chaque vente une seule fois (idempotence par id),
- * refuse celles listées dans `refuse`, et peut couper le réseau à la n-ième requête (avant ou après traitement).
+ * fetch simulé pour les routes de la file (§5 et §9) : le serveur garde chaque opération une seule fois
+ * (idempotence par id), note l'ordre d'arrivée, refuse ce qui est listé dans `refuse` (409 pour une ouverture,
+ * comme une autre session déjà ouverte), et peut couper le réseau à la n-ième requête (avant ou après traitement).
  */
 function fakeServer() {
   const server = {
     received: new Map<string, Sale>(),
+    log: [] as string[], // ordre d'arrivée : « open », « sale:<id> », « refund:<id> », « move », « close »
+    sessions: new Set<string>(),
     requests: 0,
     refuse: new Set<string>(),
     cutAt: null as number | null, // numéro de requête où le réseau coupe
-    cutAfterProcessing: false, // true : le serveur enregistre le lot, mais la réponse se perd
+    cutAfterProcessing: false, // true : le serveur enregistre, mais la réponse se perd
     status: 200,
   };
+  const json = (body: unknown, status: number) => new Response(JSON.stringify(body), { status });
   vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
     server.requests += 1;
-    expect(url).toMatch(/\/sales\/batch$/);
     const cut = server.cutAt === server.requests;
     if (cut && !server.cutAfterProcessing) throw new TypeError('Failed to fetch');
-    if (server.status !== 200) {
-      return new Response(JSON.stringify({ error: { code: 'X', message: `Erreur ${server.status}` } }), { status: server.status });
+    if (server.status !== 200) return json({ error: { code: 'X', message: `Erreur ${server.status}` } }, server.status);
+    const body = JSON.parse(String(init.body));
+    let response: Response;
+    if (url.endsWith('/sales/batch')) {
+      const results = (body.sales as Sale[]).map((s) => {
+        if (server.refuse.has(s.id)) return { id: s.id, status: 'error', error: { code: 'TOTALS_MISMATCH', message: 'Totaux incohérents' } };
+        if (server.received.has(s.id)) return { id: s.id, status: 'duplicate' };
+        server.received.set(s.id, s);
+        server.log.push(`sale:${s.id}`);
+        return { id: s.id, status: 'created' };
+      });
+      response = json({ results }, 200);
+    } else if (url.endsWith('/cash-sessions')) {
+      if (server.refuse.has(body.id)) {
+        response = json({ error: { code: 'SESSION_ALREADY_OPEN', message: 'Une autre session est ouverte sur cette caisse' } }, 409);
+      } else {
+        const created = !server.sessions.has(body.id);
+        if (created) server.log.push('open');
+        server.sessions.add(body.id);
+        response = json({ id: body.id, status: created ? 'created' : 'duplicate' }, created ? 201 : 200);
+      }
+    } else if (url.endsWith('/refunds')) {
+      if (server.refuse.has(body.id)) {
+        response = json({ error: { code: 'RETURN_EXCEEDS', message: 'Plus que ce qui reste à retourner' } }, 422);
+      } else {
+        server.log.push(`refund:${body.id}`);
+        response = json({ id: body.id, status: 'created', session_closed: false }, 201);
+      }
+    } else if (url.endsWith('/cash-movements')) {
+      server.log.push('move');
+      response = json({ id: body.id, status: 'created', session_closed: false }, 201);
+    } else if (/\/cash-sessions\/[^/]+\/close$/.test(url)) {
+      server.log.push('close');
+      response = json({ status: 'closed', expected_mismatch: false }, 200);
+    } else {
+      throw new Error(`Route inattendue : ${url}`);
     }
-    const { sales } = JSON.parse(String(init.body)) as { sales: Sale[] };
-    const results = sales.map((s) => {
-      if (server.refuse.has(s.id)) return { id: s.id, status: 'error', error: { code: 'TOTALS_MISMATCH', message: 'Totaux incohérents' } };
-      if (server.received.has(s.id)) return { id: s.id, status: 'duplicate' };
-      server.received.set(s.id, s);
-      return { id: s.id, status: 'created' };
-    });
     if (cut) throw new TypeError('Failed to fetch'); // traité côté serveur, réponse perdue
-    return new Response(JSON.stringify({ results }), { status: 200 });
+    return response;
   });
   return server;
 }
@@ -77,7 +143,7 @@ describe('envoi des ventes gardées sur la caisse', () => {
     const server = fakeServer();
     const sales = [sale(), sale(), sale()];
     const outbox = memoryOutbox(sales);
-    const result = await flushOutbox(outbox, api.syncSales);
+    const result = await flushOutbox(outbox, apiSenders);
     expect(result).toEqual({ status: 'done', sent: sales.map((s) => s.id), rejected: [] });
     expect(outbox.items).toEqual([]);
     expect([...server.received.keys()]).toEqual(sales.map((s) => s.id));
@@ -89,7 +155,7 @@ describe('envoi des ventes gardées sur la caisse', () => {
     const already = sale();
     server.received.set(already.id, already);
     const outbox = memoryOutbox([already, sale()]);
-    const result = await flushOutbox(outbox, api.syncSales);
+    const result = await flushOutbox(outbox, apiSenders);
     expect(result.sent).toHaveLength(2);
     expect(outbox.items).toEqual([]);
     expect(server.received.size).toBe(2);
@@ -100,17 +166,17 @@ describe('envoi des ventes gardées sur la caisse', () => {
     const [a, b, c] = [sale(), sale(), sale()];
     server.refuse.add(b.id);
     const outbox = memoryOutbox([a, b, c]);
-    const result = await flushOutbox(outbox, api.syncSales);
+    const result = await flushOutbox(outbox, apiSenders);
     expect(result).toEqual({ status: 'done', sent: [a.id, c.id], rejected: [{ id: b.id, error: 'Totaux incohérents' }] });
-    expect(outbox.items).toEqual([{ sale: b, error: 'Totaux incohérents' }]);
+    expect(outbox.items).toEqual([item(b, 'Totaux incohérents')]);
 
     // Sans demande explicite, elle n'est pas renvoyée (le serveur la refuserait encore)…
     const before = server.requests;
-    await flushOutbox(outbox, api.syncSales);
+    await flushOutbox(outbox, apiSenders);
     expect(server.requests).toBe(before);
     // … un clic sur l'indicateur la renvoie, une fois corrigée côté serveur.
     server.refuse.clear();
-    expect((await flushOutbox(outbox, api.syncSales, { includeErrors: true })).sent).toEqual([b.id]);
+    expect((await flushOutbox(outbox, apiSenders, { includeErrors: true })).sent).toEqual([b.id]);
     expect(outbox.items).toEqual([]);
   });
 
@@ -119,13 +185,13 @@ describe('envoi des ventes gardées sur la caisse', () => {
     const sales = [sale(), sale(), sale(), sale(), sale()];
     const outbox = memoryOutbox(sales);
     server.cutAt = 2; // 2e lot : plus de réseau
-    const first = await flushOutbox(outbox, api.syncSales, { batchSize: 2 });
+    const first = await flushOutbox(outbox, apiSenders, { batchSize: 2 });
     expect(first).toEqual({ status: 'offline', sent: sales.slice(0, 2).map((s) => s.id), rejected: [] });
-    expect(outbox.items.map((i) => i.sale.id)).toEqual(sales.slice(2).map((s) => s.id));
+    expect(outbox.items.map((i) => i.id)).toEqual(sales.slice(2).map((s) => s.id));
     expect(outbox.items.every((i) => i.error === null)).toBe(true);
 
     server.cutAt = null; // le réseau revient
-    const second = await flushOutbox(outbox, api.syncSales, { batchSize: 2 });
+    const second = await flushOutbox(outbox, apiSenders, { batchSize: 2 });
     expect(second.status).toBe('done');
     expect(outbox.items).toEqual([]);
     expect([...server.received.keys()]).toEqual(sales.map((s) => s.id));
@@ -137,12 +203,12 @@ describe('envoi des ventes gardées sur la caisse', () => {
     const outbox = memoryOutbox(sales);
     server.cutAt = 1;
     server.cutAfterProcessing = true;
-    expect((await flushOutbox(outbox, api.syncSales)).status).toBe('offline');
+    expect((await flushOutbox(outbox, apiSenders)).status).toBe('offline');
     expect(outbox.items).toHaveLength(3); // la caisse ne sait pas que le serveur les a reçues : elle les garde
     expect(server.received.size).toBe(3);
 
     server.cutAt = null;
-    expect((await flushOutbox(outbox, api.syncSales)).sent).toHaveLength(3);
+    expect((await flushOutbox(outbox, apiSenders)).sent).toHaveLength(3);
     expect(outbox.items).toEqual([]);
     expect(server.received.size).toBe(3);
   });
@@ -151,7 +217,7 @@ describe('envoi des ventes gardées sur la caisse', () => {
     const server = fakeServer();
     server.status = 401;
     const outbox = memoryOutbox([sale(), sale()]);
-    expect(await flushOutbox(outbox, api.syncSales)).toEqual({ status: 'unauthorized', sent: [], rejected: [] });
+    expect(await flushOutbox(outbox, apiSenders)).toEqual({ status: 'unauthorized', sent: [], rejected: [] });
     expect(outbox.items.every((i) => i.error === null)).toBe(true);
     expect(outbox.items).toHaveLength(2);
   });
@@ -161,7 +227,7 @@ describe('envoi des ventes gardées sur la caisse', () => {
       const server = fakeServer();
       server.status = status;
       const outbox = memoryOutbox([sale()]);
-      expect((await flushOutbox(outbox, api.syncSales)).status).toBe('offline');
+      expect((await flushOutbox(outbox, apiSenders)).status).toBe('offline');
       expect(outbox.items[0].error).toBeNull();
     }
   });
@@ -177,7 +243,7 @@ describe('envoi des ventes gardées sur la caisse', () => {
       }
       return { results: batch.map((s) => ({ id: s.id, status: 'created' })) };
     };
-    const result = await flushOutbox(outbox, send, { batchSize: 2 });
+    const result = await flushOutbox(outbox, { ...apiSenders, sales: send }, { batchSize: 2 });
     expect(result.status).toBe('done');
     expect(result.sent).toHaveLength(1);
     expect(outbox.items.map((i) => i.error)).toEqual(['Requête invalide', 'Requête invalide']);
@@ -186,11 +252,11 @@ describe('envoi des ventes gardées sur la caisse', () => {
   it('vente absente de la réponse ou réponse illisible : gardée telle quelle', async () => {
     const [a, b] = [sale(), sale()];
     const outbox = memoryOutbox([a, b]);
-    await flushOutbox(outbox, async () => ({ results: [{ id: a.id, status: 'created' }] }));
-    expect(outbox.items).toEqual([{ sale: b, error: null }]);
-    const garbage = await flushOutbox(outbox, async () => ({}) as never);
+    await flushOutbox(outbox, { ...apiSenders, sales: async () => ({ results: [{ id: a.id, status: 'created' }] }) });
+    expect(outbox.items).toEqual([item(b)]);
+    const garbage = await flushOutbox(outbox, { ...apiSenders, sales: async () => ({}) as never });
     expect(garbage.status).toBe('offline');
-    expect(outbox.items).toEqual([{ sale: b, error: null }]);
+    expect(outbox.items).toEqual([item(b)]);
   });
 });
 
@@ -281,9 +347,16 @@ const product = (id: string, stock: number, extra: Partial<Product> = {}): Produ
 describe('catalogue hors ligne', () => {
   it('stock en attente d’envoi : quantités vendues sur ce magasin, par article', () => {
     const other = { ...sale(5, 'p_1'), store_id: 'st_1' };
-    const pending = pendingQuantities([{ sale: sale(2, 'p_1'), error: null }, { sale: sale(0.25, 'p_1'), error: null },
-      { sale: sale(1, 'p_2'), error: null }, { sale: other, error: null }], 'st_2');
+    const pending = pendingQuantities([item(sale(2, 'p_1')), item(sale(0.25, 'p_1')), openingOp(), movementOp(),
+      item(sale(1, 'p_2')), item(other), closeOp()], 'st_2');
     expect([...pending]).toEqual([['p_1', 2.25], ['p_2', 1]]);
+  });
+
+  it('retour pas encore reçu : ses quantités sont déduites (le serveur ne les a pas encore remises en stock)', () => {
+    const pending = pendingQuantities([item(sale(2, 'p_1')), refundOp(sale(3, 'p_1'), 1.5), refundOp(sale(1, 'p_2'))], 'st_2');
+    expect([...pending]).toEqual([['p_1', 0.5], ['p_2', -1]]);
+    const { put } = catalogChanges([product('p_2', 10)], pending);
+    expect(put[0].stock).toBe(11);
   });
 
   it('changements reçus : actifs mis à jour (moins les ventes pas encore reçues), désactivés retirés', () => {
@@ -306,5 +379,129 @@ describe('catalogue hors ligne', () => {
     expect(['fati', 'ZAHRA', '06 12 34', '612345678', '0024', '24001', '0712'].map((q) => matchesCustomer(c, q)))
       .toEqual([true, true, true, true, true, true, false]);
     expect(matchesCustomer({ ...c, phone: null, matricule: null }, '06')).toBe(false);
+  });
+});
+
+// --- Sessions de caisse : une seule file, dans l'ordre (§9) --------------------------------------------
+
+describe('envoi des opérations de session', () => {
+  it('session faite hors ligne : ouverture, ventes, sortie, clôture arrivent dans l’ordre, une seule fois', async () => {
+    const server = fakeServer();
+    const [s1, s2, s3] = [sale(), sale(), sale()];
+    const outbox = memoryOutbox([openingOp(), s1, s2, movementOp(), s3, closeOp()]);
+    const result = await flushOutbox(outbox, apiSenders);
+    expect(result.status).toBe('done');
+    expect(server.log).toEqual(['open', `sale:${s1.id}`, `sale:${s2.id}`, 'move', `sale:${s3.id}`, 'close']);
+    expect(server.requests).toBe(5); // les ventes qui se suivent partent ensemble
+    expect(outbox.items).toEqual([]);
+  });
+
+  it('retours : envoyés un à un, à leur place dans la file, entre les lots de ventes', async () => {
+    const server = fakeServer();
+    const [s1, s2] = [sale(), sale()];
+    const refund = refundOp(s1);
+    const outbox = memoryOutbox([openingOp(), s1, refund, s2, closeOp()]);
+    const result = await flushOutbox(outbox, apiSenders);
+    expect(result.status).toBe('done');
+    expect(server.log).toEqual(['open', `sale:${s1.id}`, `refund:${refund.id}`, `sale:${s2.id}`, 'close']);
+    expect(outbox.items).toEqual([]);
+  });
+
+  it('retour refusé (422, déjà retourné sur une autre caisse) : gardé avec le motif, la suite part', async () => {
+    const server = fakeServer();
+    const refund = refundOp(sale());
+    server.refuse.add(refund.id);
+    const outbox = memoryOutbox([refund, closeOp()]);
+    const result = await flushOutbox(outbox, apiSenders);
+    expect(result.rejected).toEqual([{ id: refund.id, error: 'Plus que ce qui reste à retourner' }]);
+    expect(server.log).toEqual(['close']);
+    expect(outbox.items).toEqual([{ ...refund, error: 'Plus que ce qui reste à retourner' }]);
+  });
+
+  it('coupure au milieu : on s’arrête, la suite attend dans le même ordre, rien n’est perdu ni doublé', async () => {
+    const server = fakeServer();
+    const [s1, s2] = [sale(), sale()];
+    const move = movementOp();
+    const outbox = memoryOutbox([openingOp(), s1, move, s2, closeOp()]);
+    server.cutAt = 3; // la sortie d'espèces ne passe pas
+    expect((await flushOutbox(outbox, apiSenders)).status).toBe('offline');
+    expect(outbox.items.map((i) => i.id)).toEqual([move.id, s2.id, closeKey(SESSION)]);
+
+    server.cutAt = null;
+    expect((await flushOutbox(outbox, apiSenders)).status).toBe('done');
+    expect(server.log).toEqual(['open', `sale:${s1.id}`, 'move', `sale:${s2.id}`, 'close']);
+    expect(outbox.items).toEqual([]);
+  });
+
+  it('ouverture reçue mais réponse perdue : au renvoi, « duplicate », une seule session côté serveur', async () => {
+    const server = fakeServer();
+    const outbox = memoryOutbox([openingOp(), sale()]);
+    server.cutAt = 1;
+    server.cutAfterProcessing = true;
+    expect((await flushOutbox(outbox, apiSenders)).status).toBe('offline');
+    expect(outbox.items).toHaveLength(2);
+    server.cutAt = null;
+    expect((await flushOutbox(outbox, apiSenders)).sent).toHaveLength(2);
+    expect(server.log.filter((l) => l === 'open')).toHaveLength(1);
+    expect(outbox.items).toEqual([]);
+  });
+
+  it('ouverture refusée (409, autre session ouverte) : gardée avec le motif, la suite part, renvoi sur demande', async () => {
+    const server = fakeServer();
+    server.refuse.add(SESSION);
+    const s1 = sale();
+    const outbox = memoryOutbox([openingOp(), s1, closeOp()]);
+    const result = await flushOutbox(outbox, apiSenders);
+    expect(result.rejected).toEqual([{ id: SESSION, error: 'Une autre session est ouverte sur cette caisse' }]);
+    expect(outbox.items).toEqual([{ ...openingOp(), error: 'Une autre session est ouverte sur cette caisse' }]);
+
+    await flushOutbox(outbox, apiSenders); // pas renvoyée d'office : le serveur la refuserait encore
+    expect(outbox.items).toHaveLength(1);
+    server.refuse.clear(); // l'autre session a été clôturée au back-office
+    expect((await flushOutbox(outbox, apiSenders, { includeErrors: true })).sent).toEqual([SESSION]);
+    expect(outbox.items).toEqual([]);
+  });
+
+  it('token expiré (401) sur une ouverture : on s’arrête sans rien retirer ni marquer', async () => {
+    const server = fakeServer();
+    server.status = 401;
+    const outbox = memoryOutbox([openingOp(), sale()]);
+    expect(await flushOutbox(outbox, apiSenders)).toEqual({ status: 'unauthorized', sent: [], rejected: [] });
+    expect(outbox.items.every((i) => i.error === null)).toBe(true);
+    expect(outbox.items).toHaveLength(2);
+  });
+
+  it('relecture de la file : chaque sorte d’opération, ligne abîmée refusée (ni envoyée ni effacée)', () => {
+    const s = sale();
+    const [open, move, close, refund] = [openingOp(), movementOp(), closeOp(), refundOp(s)];
+    for (const valid of [item(s), item(s, 'Totaux incohérents'), open, move, close, refund]) expect(isOutboxItem(valid)).toBe(true);
+    const broken = [
+      { sale: s, error: null }, // sans « kind » (ancienne version)
+      { ...item(s), id: 'autre' }, // clé différente de l'id de la vente
+      { ...item(s), sale: { ...s, session_id: undefined } }, // vente d'avant les sessions
+      { ...open, opening: { ...open.opening, opening_cash: -1 } },
+      { ...move, movement: { ...move.movement, reason: '' } },
+      { ...close, id: SESSION }, // la clôture a sa propre clé
+      { ...close, closing: { ...close.closing, counts: close.closing.counts.map((c) => ({ ...c, difference: 0 })) } }, // écart incohérent
+      { ...close, closing: { ...close.closing, counts: undefined, counted_cash: 56000 } }, // clôture v0.4 d'essai
+      { ...item(s), kind: 'refund' },
+      { ...refund, id: s.id }, // clé différente de l'id du retour
+      { ...refund, refund: { ...refund.refund, reason: 'vol' } },
+      { ...refund, refund: { ...refund.refund, lines: [] } },
+      { ...item(s), error: 42 },
+      null,
+    ];
+    for (const b of broken) expect(isOutboxItem(b), JSON.stringify(b)).toBe(false);
+  });
+
+  it('session de chaque opération, et libellé montré au caissier en cas de refus', () => {
+    const s = sale();
+    const refund = refundOp(s);
+    expect([item(s), openingOp(), movementOp(), closeOp(), refund].map(itemSession)).toEqual([SESSION, SESSION, SESSION, SESSION, SESSION]);
+    expect(describeItem(item(s))).toBe(`Vente ${s.number}`);
+    expect(describeItem(refund)).toBe('Retour R-ST2-REG3-000001');
+    expect(describeItem(openingOp())).toBe('Ouverture de caisse');
+    expect(describeItem(movementOp(5000))).toMatch(/^Sortie d’espèces de 50,00/);
+    expect(describeItem(closeOp())).toBe('Clôture de caisse');
   });
 });

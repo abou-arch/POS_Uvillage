@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { api, ApiError } from '../api/client';
+import { isAuth } from '../state/session';
 import type { Auth } from '../types';
 import { Icon } from './ui';
 
@@ -16,7 +17,13 @@ export function Login({ onLogin, notice }: { onLogin: (auth: Auth) => void; noti
     setLoading(true);
     setError(null);
     try {
-      onLogin(await api.login(username, password));
+      const auth = await api.login(username, password);
+      // Réponse incomplète (par exemple sans seuil d'écart de clôture, §2) : la caisse ne pourrait pas la relire.
+      if (!isAuth(auth)) {
+        setError('Réponse du serveur inattendue : connexion impossible. Prévenez le responsable.');
+        return;
+      }
+      onLogin(auth);
     } catch (err) {
       // Seule l'API donne un message lisible ; sinon le serveur n'a pas répondu.
       setError(err instanceof ApiError ? err.message : 'Serveur injoignable. Vérifiez la connexion.');

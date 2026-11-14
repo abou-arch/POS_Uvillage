@@ -24,7 +24,7 @@ export async function migrateFromLocalStorage(storage = browserStorage() as Stor
   if (pending.sales.length > 0) {
     // Même format que les nouvelles ventes (avec millisecondes) : l'ordre d'envoi reste celui des ventes.
     await db.outbox.bulkPut(pending.sales.map((p) => ({
-      id: p.sale.id, sale: p.sale, error: p.error, queued_at: new Date(p.sale.created_at).toISOString(),
+      kind: 'sale' as const, id: p.sale.id, sale: p.sale, error: p.error, queued_at: new Date(p.sale.created_at).toISOString(),
     })));
     if (pending.unreadable.length > 0) savePending({ sales: [], unreadable: pending.unreadable }, storage);
     else storage.removeItem('pos.pendingSales');

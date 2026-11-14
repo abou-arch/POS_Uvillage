@@ -18,9 +18,9 @@ const stored = (value: unknown) => memoryStorage({ 'pos.pendingSales': JSON.stri
 
 const thon: CartLine = { product_id: 'p_9', name: 'THON ISABEL TOMATE', quantity: 1, unit_price_ttc: 1000, discount: 0, tva_rate: 20, stock: 20 };
 const sale = buildSale({
-  cart: { ...emptyCart, lines: [thon] }, storeId: 'st_2', registerId: 'reg_3', cashierId: 'u_2',
+  cart: { ...emptyCart, lines: [thon] }, storeId: 'st_2', registerId: 'reg_3', sessionId: '3b9d6c1e-8f2a-4d5b-9c7e-1a2b3c4d5e6f', cashierId: 'u_2',
   payments: [{ method: 'cash', amount: 1000 }], amountReceived: 2000,
-  id: '0f8b7c2e-5c1d-4c6e-9a4b-2f1e3d4c5b6a', counter: 1, now: new Date('2026-10-05T14:32:10Z'),
+  id: '0f8b7c2e-5c1d-4c6e-9a4b-2f1e3d4c5b6a', lineIds: ['5d2e8f1a-7b3c-4e9d-8a6f-1c2b3d4e5f60'], counter: 1, now: new Date('2026-10-05T14:32:10Z'),
 });
 
 describe('ventes gardées sur la caisse', () => {
@@ -37,7 +37,7 @@ describe('ventes gardées sur la caisse', () => {
     const cart: CartState = { lines: [olives, pain, thon], customer: ahmed, otherCharges: 200, globalDiscount: 50, sendSms: true };
     const { ttc } = saleTotals(cart.lines, cart.otherCharges, cart.globalDiscount);
     const mixed = buildSale({
-      cart, storeId: 'st_1', registerId: 'reg_1', cashierId: 'u_1', amountReceived: 500, id: uuidv4(), counter: 42,
+      cart, storeId: 'st_1', registerId: 'reg_1', sessionId: '3b9d6c1e-8f2a-4d5b-9c7e-1a2b3c4d5e6f', cashierId: 'u_1', amountReceived: 500, id: uuidv4(), lineIds: cart.lines.map(() => uuidv4()), counter: 42,
       payments: [{ method: 'cash', amount: 300 }, { method: 'card', amount: 500 }, { method: 'credit', amount: ttc - 800 }],
       now: new Date('2026-10-11T09:15:00.456Z'),
     });
@@ -58,6 +58,8 @@ describe('ventes gardées sur la caisse', () => {
     const line = sale.lines[0];
     const changes: Record<string, unknown>[] = [
       { id: 'vente-1' }, // pas un UUID v4
+      { session_id: undefined }, // vente d'avant les sessions de caisse (contrat 0.3)
+      { session_id: 'session-1' },
       { created_at: 'hier' },
       { customer_id: 42 },
       { lines: [] }, // panier vide

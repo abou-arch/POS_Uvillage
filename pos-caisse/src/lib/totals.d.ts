@@ -6,4 +6,6 @@ export function allocate(amount: number, weights: number[]): number[];
 export function vatBreakdown(lines: TotalsLine[], otherCharges?: number, globalDiscount?: number): VatGroup[];
 export function vatBreakdownOfLines(lines: { tva_rate: number; total_ttc: number }[], otherCharges?: number, globalDiscount?: number): VatGroup[];
 export function saleTotals(lines: TotalsLine[], otherCharges?: number, globalDiscount?: number): Totals;
+export function paidByLine(lines: { tva_rate: number; total_ttc: number }[], otherCharges?: number, globalDiscount?: number): number[];
+export function refundLine(paid: number, tvaRate: number, sold: number, returnedBefore: number, quantity: number): Totals;
 export function formatMad(cents: number): string;

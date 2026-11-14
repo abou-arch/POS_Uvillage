@@ -5,11 +5,12 @@
 export const users = [
   { id: 'u_1', username: 'admin', password: 'admin', name: 'Falcon', role: 'admin', store_ids: ['st_1', 'st_2'] },
   { id: 'u_2', username: 'caissier', password: 'caissier', name: 'Caissier 1', role: 'cashier', store_ids: ['st_2'] },
+  { id: 'u_3', username: 'responsable', password: 'responsable', name: 'Responsable', role: 'manager', store_ids: ['st_1', 'st_2'] },
 ];
 
 export const stores = [
-  { id: 'st_1', name: 'Magasin centre', registers: [{ id: 'reg_1', name: 'Caisse 1' }, { id: 'reg_2', name: 'Caisse 2' }] },
-  { id: 'st_2', name: 'Magasin quartier', registers: [{ id: 'reg_3', name: 'Caisse 1' }] },
+  { id: 'st_1', name: 'Magasin centre', closing_difference_threshold: 2000, registers: [{ id: 'reg_1', name: 'Caisse 1' }, { id: 'reg_2', name: 'Caisse 2' }] },
+  { id: 'st_2', name: 'Magasin quartier', closing_difference_threshold: 2000, registers: [{ id: 'reg_3', name: 'Caisse 1' }] },
 ];
 
 export const categories = [
@@ -66,3 +67,6 @@ export const customers = [
 ];
 
 export const sales = new Map();
+export const cashSessions = new Map(); // sessions de caisse (§9)
+export const cashMovements = new Map(); // entrées et sorties d'espèces (§9)
+export const refunds = new Map(); // retours (§10)

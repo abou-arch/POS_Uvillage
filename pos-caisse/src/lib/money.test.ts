@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { madInput, parseMad } from './money';
+import { madInput, parseMad, parseSignedMad } from './money';
 
 describe('saisie des montants', () => {
   it('lit les dirhams avec virgule, point ou espaces', () => {
@@ -15,5 +15,13 @@ describe('saisie des montants', () => {
   it('affiche les centimes pour un champ de saisie', () => {
     expect(madInput(1250)).toBe('12,50');
     expect(madInput(20000)).toBe('200,00');
+  });
+  it('total du terminal : un montant négatif est accepté avec le signe moins', () => {
+    expect(parseSignedMad('-12,50')).toBe(-1250);
+    expect(parseSignedMad(' - 1 000 ')).toBe(-100000);
+    expect(parseSignedMad('8')).toBe(800);
+    expect(parseSignedMad('--1')).toBeNull();
+    expect(parseSignedMad('-')).toBeNull();
+    expect(madInput(-1250)).toBe('-12,50');
   });
 });

@@ -1,17 +1,17 @@
 // Synchronisation de la caisse : vide l'outbox puis met le catalogue à jour, au démarrage, quand le réseau
-// revient, toutes les 30 s (moins souvent après des échecs), après chaque vente et sur clic de l'indicateur.
+// revient, toutes les 30 s (moins souvent après des échecs), après chaque opération et sur clic de l'indicateur.
+// Elle tourne tant qu'une caisse est choisie, session ouverte ou non : la clôture part aussi depuis l'écran d'ouverture.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api } from '../api/client';
 import { syncCatalog } from '../db/catalog';
 import { db } from '../db/db';
 import { ensureMigrated } from '../db/migrate';
 import { dexieOutbox, isOutboxEntry } from '../db/outbox';
 import { useLiveQuery } from '../db/useLiveQuery';
-import { createSyncLoop, flushOutbox } from './sync';
+import { apiSenders, createSyncLoop, flushOutbox } from './sync';
 
 export type Connection = 'online' | 'offline' | 'syncing';
 
-/** Ce que la dernière synchro a dit de chaque vente : reçue, ou refusée avec le motif. */
+/** Ce que la dernière synchro a dit de chaque opération : reçue, ou refusée avec le motif. */
 export type Outcome = { status: 'sent' } | { status: 'rejected'; error: string };
 
 const MAX_OUTCOMES = 50;
@@ -37,7 +37,7 @@ export function useSync(storeId: string) {
       setConnection('syncing');
       try {
         await ensureMigrated(); // les ventes à envoyer de l'ancienne version partent aussi
-        const flush = await flushOutbox(dexieOutbox, api.syncSales, { includeErrors: force });
+        const flush = await flushOutbox(dexieOutbox, apiSenders, { includeErrors: force });
         record(flush.sent, flush.rejected);
         if (flush.status !== 'done') {
           setConnection('offline');
@@ -76,3 +76,5 @@ export function useSync(storeId: string) {
     sync: useCallback((force = false) => void loop.current?.trigger(force), []),
   };
 }
+
+export type SyncState = ReturnType<typeof useSync>;

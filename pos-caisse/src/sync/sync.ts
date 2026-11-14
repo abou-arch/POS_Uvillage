@@ -1,11 +1,31 @@
-// Synchronisation hors ligne, sans dépendance au stockage : la file des ventes (outbox), l'API et les minuteries
+// Synchronisation hors ligne, sans dépendance au stockage : la file d'envoi (outbox), l'API et les minuteries
 // sont passées en paramètres. Tout ce qui décide quoi envoyer, quoi garder et quand réessayer est ici, et testé.
-import { ApiError } from '../api/client';
-import type { Product, Sale } from '../types';
+import { api, ApiError } from '../api/client';
+import { isRefund } from '../lib/buildRefund';
+import { isClosing, isMovement, isOpening, MOVEMENT_LABELS } from '../lib/cashSession';
+import { formatMad } from '../lib/totals.js';
+import { isSale, isUuid } from '../state/sales';
+import type { CashMovement, CashSessionClosing, CashSessionOpening, Product, Refund, Sale } from '../types';
 
-export interface OutboxItem { sale: Sale; error: string | null }
+/**
+ * Ce que la caisse garde pour l'envoyer à l'API (§9, §10) : les ventes, les retours, et l'ouverture, les mouvements
+ * d'espèces et la clôture des sessions. Tout part dans l'ordre où cela a été fait : l'API reçoit l'ouverture avant les ventes.
+ */
+export type OutboxOperation =
+  | { kind: 'sale'; sale: Sale }
+  | { kind: 'refund'; refund: Refund }
+  | { kind: 'session_open'; opening: CashSessionOpening }
+  | { kind: 'cash_movement'; movement: CashMovement }
+  | { kind: 'session_close'; session_id: string; closing: CashSessionClosing };
 
-/** La file des ventes à envoyer, dans l'ordre où elles ont été faites. */
+/** Une opération de la file. `error` = refus du serveur, à faire vérifier (elle n'est plus renvoyée d'office). */
+export type OutboxItem = OutboxOperation & { id: string; error: string | null };
+type SaleItem = Extract<OutboxItem, { kind: 'sale' }>;
+
+/** Clé de la clôture dans la file (l'ouverture a déjà l'id de la session). */
+export const closeKey = (sessionId: string) => `close:${sessionId}`;
+
+/** La file d'envoi, dans l'ordre où les opérations ont été faites. */
 export interface OutboxStore {
   list(): Promise<OutboxItem[]>;
   remove(ids: string[]): Promise<void>;
@@ -14,6 +34,23 @@ export interface OutboxStore {
 
 /** Réponse de POST /api/sales/batch (§5 du contrat) : un résultat par vente. */
 export interface BatchResponse { results: { id: string; status: string; error?: { message?: string } }[] }
+
+/** Les routes de l'API qui reçoivent la file (§5 et §9). */
+export interface OutboxApi {
+  sales: (sales: Sale[]) => Promise<BatchResponse>;
+  refund: (refund: Refund) => Promise<unknown>;
+  openSession: (opening: CashSessionOpening) => Promise<unknown>;
+  addMovement: (movement: CashMovement) => Promise<unknown>;
+  closeSession: (sessionId: string, closing: CashSessionClosing) => Promise<unknown>;
+}
+
+export const apiSenders: OutboxApi = {
+  sales: api.syncSales,
+  refund: api.createRefund,
+  openSession: api.openCashSession,
+  addMovement: api.addCashMovement,
+  closeSession: api.closeCashSession,
+};
 
 export type FlushStatus = 'done' | 'offline' | 'unauthorized';
 export interface FlushResult { status: FlushStatus; sent: string[]; rejected: { id: string; error: string }[] }
@@ -24,29 +61,67 @@ export const BATCH_SIZE = 20;
 const isTemporary = (err: unknown) =>
   !(err instanceof ApiError) || err.status >= 500 || err.status === 408 || err.status === 429;
 
+const refusal = (err: unknown) => (err instanceof Error && err.message ? err.message : 'Refusée par le serveur');
+
+/** Une opération qui n'est pas une vente part seule. Toute réponse 2xx (créée, déjà reçue, clôturée) la retire de la file. */
+function sendOne(send: OutboxApi, item: Exclude<OutboxItem, SaleItem>): Promise<unknown> {
+  switch (item.kind) {
+    case 'refund': return send.refund(item.refund);
+    case 'session_open': return send.openSession(item.opening);
+    case 'cash_movement': return send.addMovement(item.movement);
+    case 'session_close': return send.closeSession(item.session_id, item.closing);
+  }
+}
+
 /**
- * Vide la file par lots. « created » et « duplicate » : retirées de la file. « error » : gardées, marquées en erreur.
- * Coupure ou panne : on s'arrête, les lots déjà acceptés sont retirés, le reste attend. Token refusé (401) :
- * on s'arrête sans rien toucher, l'envoi reprendra après la reconnexion. Une vente marquée en erreur n'est
+ * Vide la file dans l'ordre. Les ventes qui se suivent partent par lots (POST /api/sales/batch) : « created » et
+ * « duplicate » sont retirées de la file, « error » gardées et marquées. Les autres opérations partent une à une.
+ * Coupure ou panne : on s'arrête, ce qui a été accepté est retiré, le reste attend dans l'ordre. Token refusé (401) :
+ * on s'arrête sans rien toucher, l'envoi reprendra après la reconnexion. Une opération marquée en erreur n'est
  * renvoyée que si on le demande (`includeErrors`, clic sur l'indicateur) : le serveur la refuserait encore.
  */
 export async function flushOutbox(
   outbox: OutboxStore,
-  sendBatch: (sales: Sale[]) => Promise<BatchResponse>,
+  send: OutboxApi,
   { includeErrors = false, batchSize = BATCH_SIZE } = {},
 ): Promise<FlushResult> {
-  const sales = (await outbox.list()).filter((e) => includeErrors || e.error === null).map((e) => e.sale);
+  const items = (await outbox.list()).filter((e) => includeErrors || e.error === null);
   const result: FlushResult = { status: 'done', sent: [], rejected: [] };
-  for (let i = 0; i < sales.length; i += batchSize) {
-    const batch = sales.slice(i, i + batchSize);
+  let i = 0;
+  while (i < items.length) {
+    const item = items[i];
+    if (item.kind !== 'sale') {
+      i += 1;
+      try {
+        await sendOne(send, item);
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 401) return { ...result, status: 'unauthorized' };
+        if (isTemporary(err)) return { ...result, status: 'offline' };
+        const rejected = { id: item.id, error: refusal(err) };
+        await outbox.markError([rejected]);
+        result.rejected.push(rejected);
+        continue;
+      }
+      await outbox.remove([item.id]);
+      result.sent.push(item.id);
+      continue;
+    }
+
+    const batch: SaleItem[] = []; // les ventes qui se suivent, `batchSize` au plus
+    while (i < items.length && batch.length < batchSize) {
+      const next = items[i];
+      if (next.kind !== 'sale') break;
+      batch.push(next);
+      i += 1;
+    }
     let response: BatchResponse;
     try {
-      response = await sendBatch(batch);
+      response = await send.sales(batch.map((b) => b.sale));
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) return { ...result, status: 'unauthorized' };
       if (isTemporary(err)) return { ...result, status: 'offline' };
-      // Lot refusé en entier (400…) : chaque vente est marquée, les lots suivants partent quand même.
-      const rejected = batch.map((s) => ({ id: s.id, error: err instanceof Error ? err.message : 'Refusée par le serveur' }));
+      // Lot refusé en entier (400…) : chaque vente est marquée, la suite part quand même.
+      const rejected = batch.map((b) => ({ id: b.id, error: refusal(err) }));
       await outbox.markError(rejected);
       result.rejected.push(...rejected);
       continue;
@@ -55,10 +130,10 @@ export async function flushOutbox(
     const byId = new Map(response.results.map((r) => [r.id, r]));
     const sent: string[] = [];
     const rejected: { id: string; error: string }[] = [];
-    for (const sale of batch) {
-      const r = byId.get(sale.id);
-      if (r?.status === 'created' || r?.status === 'duplicate') sent.push(sale.id);
-      else if (r?.status === 'error') rejected.push({ id: sale.id, error: r.error?.message ?? 'Refusée par le serveur' });
+    for (const { id } of batch) {
+      const r = byId.get(id);
+      if (r?.status === 'created' || r?.status === 'duplicate') sent.push(id);
+      else if (r?.status === 'error') rejected.push({ id, error: r.error?.message ?? 'Refusée par le serveur' });
       // Absente de la réponse : gardée telle quelle, elle repartira au prochain passage.
     }
     await outbox.remove(sent);
@@ -67,6 +142,43 @@ export async function flushOutbox(
     result.rejected.push(...rejected);
   }
   return result;
+}
+
+/** Relecture d'une opération de la file : une ligne abîmée ou écrite par une autre version n'est ni envoyée ni effacée. */
+export function isOutboxItem(v: unknown): v is OutboxItem {
+  if (typeof v !== 'object' || v === null) return false;
+  const e = v as Record<string, unknown>;
+  if (typeof e.id !== 'string' || !(e.error === null || typeof e.error === 'string')) return false;
+  switch (e.kind) {
+    case 'sale': return isSale(e.sale) && e.sale.id === e.id;
+    case 'refund': return isRefund(e.refund) && e.refund.id === e.id;
+    case 'session_open': return isOpening(e.opening) && e.opening.id === e.id;
+    case 'cash_movement': return isMovement(e.movement) && e.movement.id === e.id;
+    case 'session_close': return isUuid(e.session_id) && isClosing(e.closing) && e.id === closeKey(e.session_id);
+    default: return false;
+  }
+}
+
+/** Session de caisse à laquelle appartient une opération. */
+export function itemSession(item: OutboxOperation): string {
+  switch (item.kind) {
+    case 'sale': return item.sale.session_id;
+    case 'refund': return item.refund.session_id;
+    case 'session_open': return item.opening.id;
+    case 'cash_movement': return item.movement.session_id;
+    case 'session_close': return item.session_id;
+  }
+}
+
+/** Ce que le caissier lit quand une opération est refusée. */
+export function describeItem(item: OutboxOperation): string {
+  switch (item.kind) {
+    case 'sale': return `Vente ${item.sale.number}`;
+    case 'refund': return `Retour ${item.refund.number}`;
+    case 'session_open': return 'Ouverture de caisse';
+    case 'cash_movement': return `${MOVEMENT_LABELS[item.movement.type]} d’espèces de ${formatMad(item.movement.amount)}`;
+    case 'session_close': return 'Clôture de caisse';
+  }
 }
 
 export const SYNC_INTERVAL_MS = 30_000;
@@ -141,12 +253,16 @@ export function createSyncLoop(
 
 const round3 = (n: number) => Math.round(n * 1000) / 1000; // stock au poids : 3 décimales
 
-/** Quantités vendues sur ce magasin et pas encore reçues par le serveur, par article. */
-export function pendingQuantities(outbox: OutboxItem[], storeId: string): Map<string, number> {
+/**
+ * Quantités vendues sur ce magasin et pas encore reçues par le serveur, par article, moins les quantités retournées
+ * pas encore reçues (négatif : le serveur n'a pas encore remis ces articles en stock).
+ */
+export function pendingQuantities(outbox: OutboxOperation[], storeId: string): Map<string, number> {
   const quantities = new Map<string, number>();
-  for (const { sale } of outbox) {
-    if (sale.store_id !== storeId) continue;
-    for (const l of sale.lines) quantities.set(l.product_id, round3((quantities.get(l.product_id) ?? 0) + l.quantity));
+  const add = (productId: string, q: number) => quantities.set(productId, round3((quantities.get(productId) ?? 0) + q));
+  for (const item of outbox) {
+    if (item.kind === 'sale' && item.sale.store_id === storeId) for (const l of item.sale.lines) add(l.product_id, l.quantity);
+    if (item.kind === 'refund' && item.refund.store_id === storeId) for (const l of item.refund.lines) add(l.product_id, -l.quantity);
   }
   return quantities;
 }

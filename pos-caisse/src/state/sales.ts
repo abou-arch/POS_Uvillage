@@ -22,25 +22,32 @@ const counterKey = (registerId: string) => `pos.ticketCounter.${registerId}`;
 // Une vente relue doit avoir exactement la forme que construit buildSale (§1 et §5 du contrat).
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ISO_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
-const isCents = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0;
-const isRate = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 100; // en %
-const isQuantity = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0; // décimale au poids
-const isDate = (v: unknown): v is string => typeof v === 'string' && ISO_UTC.test(v) && !Number.isNaN(Date.parse(v));
+export const isUuid = (v: unknown): v is string => typeof v === 'string' && UUID_V4.test(v);
+export const isCents = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0;
+export const isRate = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 100; // en %
+export const isQuantity = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0; // décimale au poids
+export const isDate = (v: unknown): v is string => typeof v === 'string' && ISO_UTC.test(v) && !Number.isNaN(Date.parse(v));
 const isMethod = (v: unknown): v is PaymentMethod => typeof v === 'string' && Object.hasOwn(METHOD_LABELS, v);
-const isPayment = (v: unknown): v is Payment => isRecord(v) && isMethod(v.method) && isCents(v.amount);
+export const isPayment = (v: unknown): v is Payment => isRecord(v) && isMethod(v.method) && isCents(v.amount);
 const isLine = (v: unknown): v is SaleLine =>
-  isRecord(v) && isId(v.product_id) && typeof v.name === 'string' && isQuantity(v.quantity)
+  isRecord(v) && (v.id === undefined || isUuid(v.id)) && isId(v.product_id) && typeof v.name === 'string' && isQuantity(v.quantity)
   && isCents(v.unit_price_ttc) && isCents(v.discount) && isRate(v.tva_rate)
   && isCents(v.total_ht) && isCents(v.total_tva) && isCents(v.total_ttc);
 export const isSale = (v: unknown): v is Sale =>
-  isRecord(v) && typeof v.id === 'string' && UUID_V4.test(v.id) && isId(v.number)
-  && isId(v.store_id) && isId(v.register_id) && isId(v.cashier_id) && (v.customer_id === null || isId(v.customer_id))
-  && isDate(v.created_at) && Array.isArray(v.lines) && v.lines.length > 0 && v.lines.every(isLine)
+  isRecord(v) && isUuid(v.id) && isId(v.number)
+  && isId(v.store_id) && isId(v.register_id) && isUuid(v.session_id) && isId(v.cashier_id)
+  && (v.customer_id === null || isId(v.customer_id))
+  && isDate(v.created_at) && Array.isArray(v.lines) && v.lines.length > 0 && v.lines.every(isLine) && distinctLineIds(v.lines)
   && isCents(v.other_charges) && isCents(v.global_discount)
   && isRecord(v.totals) && isCents(v.totals.ht) && isCents(v.totals.tva) && isCents(v.totals.ttc)
   && Array.isArray(v.payments) && v.payments.length > 0 && v.payments.every(isPayment)
   && isCents(v.amount_received) && isCents(v.change_given)
   && typeof v.send_sms === 'boolean' && (v.status === 'completed' || v.status === 'cancelled');
+/** Deux lignes d'une même vente n'ont jamais le même id (les ventes d'avant le contrat 0.5 n'en ont pas). */
+function distinctLineIds(lines: SaleLine[]): boolean {
+  const ids = lines.flatMap((l) => (l.id === undefined ? [] : [l.id]));
+  return new Set(ids).size === ids.length;
+}
 const isPendingSale = (v: unknown): v is PendingSale =>
   isRecord(v) && isSale(v.sale) && (v.error === null || typeof v.error === 'string');
 
