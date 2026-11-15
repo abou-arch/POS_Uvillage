@@ -18,7 +18,7 @@ let counter = 0;
 function sale(quantity = 1, productId = 'p_1'): Sale {
   counter += 1;
   return buildSale({
-    cart: { ...emptyCart, lines: [{ product_id: productId, name: 'PAIN', quantity, unit_price_ttc: 150, discount: 0, tva_rate: 0, stock: 99 }] },
+    cart: { ...emptyCart, lines: [{ product_id: productId, name: 'PAIN', unit: Number.isInteger(quantity) ? 'unit' : 'kg', quantity, unit_price_ttc: 150, discount: 0, tva_rate: 0, stock: 99 }] },
     storeId: 'st_2', registerId: 'reg_3', sessionId: '3b9d6c1e-8f2a-4d5b-9c7e-1a2b3c4d5e6f', cashierId: 'u_2',
     payments: [{ method: 'cash', amount: Math.round(quantity * 150) }], amountReceived: Math.round(quantity * 150),
     id: `00000000-0000-4000-8000-${String(counter).padStart(12, '0')}`, counter, now: new Date('2026-10-22T10:00:00Z'),
@@ -340,7 +340,7 @@ describe('boucle de synchronisation', () => {
 // --- Catalogue et stock local ------------------------------------------------------------------------
 
 const product = (id: string, stock: number, extra: Partial<Product> = {}): Product => ({
-  id, code: id, barcode: null, name: id, name_ar: null, category_id: null, brand_id: null, price_ttc: 100, tva_rate: 0,
+  id, code: id, barcode: null, name: id, name_ar: null, category_id: null, brand_id: null, price_ttc: 100, tva_rate: 0, unit: 'unit',
   image_url: null, stock, stock_alert: 5, expiry_date: null, active: true, updated_at: '2026-10-22T10:00:00Z', ...extra,
 });
 
@@ -353,7 +353,7 @@ describe('catalogue hors ligne', () => {
   });
 
   it('retour pas encore reçu : ses quantités sont déduites (le serveur ne les a pas encore remises en stock)', () => {
-    const pending = pendingQuantities([item(sale(2, 'p_1')), refundOp(sale(3, 'p_1'), 1.5), refundOp(sale(1, 'p_2'))], 'st_2');
+    const pending = pendingQuantities([item(sale(2, 'p_1')), refundOp(sale(2.5, 'p_1'), 1.5), refundOp(sale(1, 'p_2'))], 'st_2');
     expect([...pending]).toEqual([['p_1', 0.5], ['p_2', -1]]);
     const { put } = catalogChanges([product('p_2', 10)], pending);
     expect(put[0].stock).toBe(11);

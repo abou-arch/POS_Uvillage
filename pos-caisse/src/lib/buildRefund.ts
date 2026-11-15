@@ -6,6 +6,7 @@ import { METHOD_LABELS } from '../state/payment';
 import type { Payment, PaymentMethod, Refund, RefundLine, RefundReason, Sale, SaleLine } from '../types';
 import { ticketNumber } from './buildSale';
 import { formatMad, paidByLine, refundLine } from './totals.js';
+import { fitsUnit, formatQuantity, lineUnit } from './units';
 
 export const MAX_REASON_LENGTH = 200;
 
@@ -72,7 +73,9 @@ export function parseQuantity(text: string): number | null {
 export function quantityError(row: ReturnableLine, quantity: number | null): string | null {
   if (quantity === null) return `${row.line.name} : quantité invalide.`;
   if (row.remaining === 0) return `${row.line.name} : déjà entièrement retourné.`;
-  if (quantity > row.remaining) return `${row.line.name} : ${row.remaining.toLocaleString('fr-FR')} au plus à retourner.`;
+  // Vendu à la pièce (contrat 0.7) : on ne retourne pas 1,5 article. Une vente d'avant 0.7 n'a pas d'unité : pas de contrôle.
+  if (row.line.unit === 'unit' && !Number.isInteger(quantity)) return `${row.line.name} : article vendu à la pièce, quantité entière.`;
+  if (quantity > row.remaining) return `${row.line.name} : ${formatQuantity(row.remaining, lineUnit(row.line))} au plus à retourner.`;
   return null;
 }
 
@@ -84,6 +87,7 @@ export function refundLines(rows: ReturnableLine[], quantities: Map<number, numb
     const t = refundLine(row.paid, row.line.tva_rate, row.sold, row.returned, quantity);
     return [{
       original_line_id: row.line.id ?? null, line_index: row.index, product_id: row.line.product_id, name: row.line.name,
+      ...(row.line.unit ? { unit: row.line.unit } : {}), // l'unité de la vente (contrat 0.7), absente avant
       quantity, unit_price_ttc: row.line.unit_price_ttc, tva_rate: row.line.tva_rate,
       total_ht: t.ht, total_tva: t.tva, total_ttc: t.ttc,
     }];
@@ -219,7 +223,8 @@ const isRefundLine = (v: unknown): v is RefundLine =>
   isRecord(v) && (v.original_line_id === null || isUuid(v.original_line_id))
   && Number.isInteger(v.line_index) && (v.line_index as number) >= 0 && typeof v.product_id === 'string' && v.product_id !== ''
   && typeof v.name === 'string' && isQuantity(v.quantity) && isCents(v.unit_price_ttc) && isRate(v.tva_rate)
-  && isCents(v.total_ht) && isCents(v.total_tva) && isCents(v.total_ttc);
+  && isCents(v.total_ht) && isCents(v.total_tva) && isCents(v.total_ttc)
+  && (v.unit === undefined || ((v.unit === 'unit' || v.unit === 'kg') && fitsUnit(v.unit, v.quantity))); // contrat 0.7
 
 /** Un retour relu a exactement la forme que construit buildRefund. */
 export const isRefund = (v: unknown): v is Refund =>

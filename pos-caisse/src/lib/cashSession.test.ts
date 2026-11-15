@@ -15,7 +15,7 @@ const now = new Date('2026-11-12T08:02:00.456Z');
 const ahmed: Customer = { id: 'c_1', name: 'Ahmed', phone: null, matricule: null };
 
 const line = (product_id: string, quantity: number, unit_price_ttc: number, tva_rate: number, discount = 0): CartLine =>
-  ({ product_id, name: product_id, quantity, unit_price_ttc, discount, tva_rate, stock: 100 });
+  ({ product_id, name: product_id, unit: Number.isInteger(quantity) ? 'unit' : 'kg', quantity, unit_price_ttc, discount, tva_rate, stock: 100 });
 
 let counter = 0;
 function sale(lines: CartLine[], payments: Payment[], amountReceived: number, extra: { globalDiscount?: number; otherCharges?: number } = {}): Sale {

@@ -3,8 +3,8 @@ import { emptyCart, type CartState } from '../state/cart';
 import type { CartLine, Customer, Payment, Product } from '../types';
 import { buildSale, decrementStock, ticketNumber, type SaleInput } from './buildSale';
 
-const pain: CartLine = { product_id: 'p_1', name: 'PAIN NORMAL', quantity: 2, unit_price_ttc: 150, discount: 0, tva_rate: 0, stock: 60 };
-const thon: CartLine = { product_id: 'p_9', name: 'THON ISABEL TOMATE', quantity: 1, unit_price_ttc: 1000, discount: 0, tva_rate: 20, stock: 20 };
+const pain: CartLine = { product_id: 'p_1', name: 'PAIN NORMAL', unit: 'unit', quantity: 2, unit_price_ttc: 150, discount: 0, tva_rate: 0, stock: 60 };
+const thon: CartLine = { product_id: 'p_9', name: 'THON ISABEL TOMATE', unit: 'unit', quantity: 1, unit_price_ttc: 1000, discount: 0, tva_rate: 20, stock: 20 };
 const ahmed: Customer = { id: 'c_1', name: 'Ahmed', phone: '+212600000001', matricule: '2023001542' };
 const cash = (amount: number): Payment => ({ method: 'cash', amount });
 const LINE_IDS = ['5d2e8f1a-7b3c-4e9d-8a6f-1c2b3d4e5f60', 'a3c5e7f9-1b2d-4f6a-8c0e-2d4f6a8c0e1b', 'c1d2e3f4-a5b6-4c7d-8e9f-0a1b2c3d4e5f'];
@@ -26,8 +26,8 @@ describe('construction de la vente (§5 du contrat)', () => {
       send_sms: false, status: 'completed',
     });
     expect(sale.lines).toEqual([
-      { id: LINE_IDS[0], product_id: 'p_1', name: 'PAIN NORMAL', quantity: 2, unit_price_ttc: 150, discount: 0, tva_rate: 0, total_ht: 300, total_tva: 0, total_ttc: 300 },
-      { id: LINE_IDS[1], product_id: 'p_9', name: 'THON ISABEL TOMATE', quantity: 1, unit_price_ttc: 1000, discount: 0, tva_rate: 20, total_ht: 833, total_tva: 167, total_ttc: 1000 },
+      { id: LINE_IDS[0], product_id: 'p_1', name: 'PAIN NORMAL', unit: 'unit', quantity: 2, unit_price_ttc: 150, discount: 0, tva_rate: 0, total_ht: 300, total_tva: 0, total_ttc: 300 },
+      { id: LINE_IDS[1], product_id: 'p_9', name: 'THON ISABEL TOMATE', unit: 'unit', quantity: 1, unit_price_ttc: 1000, discount: 0, tva_rate: 20, total_ht: 833, total_tva: 167, total_ttc: 1000 },
     ]);
     expect(sale.lines[0]).not.toHaveProperty('stock');
   });
@@ -63,6 +63,13 @@ describe('construction de la vente (§5 du contrat)', () => {
     expect(() => buildSale(input({ lines: [thon] }, [cash(1000)], 500))).toThrow(/Il manque/);
     expect(() => buildSale(input({ lines: [thon] }, [cash(800)], 800))).toThrow(/Reste à payer/);
     expect(() => buildSale(input({ lines: [thon] }, [{ method: 'credit', amount: 1000 }], 0))).toThrow(/demande un client/);
+  });
+  it('article au poids : unité et poids recopiés sur la ligne ; quantité contraire à l’unité refusée (contrat 0.7)', () => {
+    const olives: CartLine = { product_id: 'p_20', name: 'OLIVES NOIRES', unit: 'kg', quantity: 0.75, unit_price_ttc: 2500, discount: 0, tva_rate: 0, stock: 40 };
+    const sale = buildSale(input({ lines: [olives] }, [cash(1875)], 1875));
+    expect(sale.lines[0]).toMatchObject({ unit: 'kg', quantity: 0.75, unit_price_ttc: 2500, total_ttc: 1875 });
+    expect(() => buildSale(input({ lines: [{ ...pain, quantity: 1.5 }] }, [cash(225)], 225)))
+      .toThrow('PAIN NORMAL : Article vendu à la pièce : quantité entière (pas de 1,5).');
   });
   it('refuse une vente hors session de caisse (§9)', () => {
     expect(() => buildSale({ ...input({ lines: [thon] }, [cash(1000)], 1000), sessionId: '' })).toThrow('Aucune session de caisse ouverte.');

@@ -26,8 +26,13 @@ export async function syncCatalog(storeId: string): Promise<void> {
   });
 }
 
-/** Articles du magasin, dans l'ordre des codes (IT0001, IT0002…) comme dans le catalogue. */
+/**
+ * Articles du magasin, dans l'ordre des codes (IT0001, IT0002…) comme dans le catalogue. Un article gardé avant le
+ * contrat 0.7 n'a pas d'unité : il se vend à la pièce jusqu'à la prochaine synchro.
+ */
 export async function cachedProducts(storeId: string) {
   const list = await db.products.where('store_id').equals(storeId).toArray();
-  return list.sort((a, b) => a.code.localeCompare(b.code, 'fr', { numeric: true }));
+  return list
+    .map((p) => ({ ...p, unit: p.unit === 'kg' ? 'kg' as const : 'unit' as const }))
+    .sort((a, b) => a.code.localeCompare(b.code, 'fr', { numeric: true }));
 }

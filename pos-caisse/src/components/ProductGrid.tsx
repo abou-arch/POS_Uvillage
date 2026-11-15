@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { formatMad } from '../lib/totals.js';
+import { formatQuantity, unitPrice } from '../lib/units';
 import type { Brand, Category, Product } from '../types';
 import { Icon } from './ui';
 
@@ -46,6 +46,7 @@ export function ProductGrid({ products, categories, brands, onAdd }: Props) {
       <div className="grid">
         {visible.map((p) => {
           const level = p.stock <= 0 ? 'out' : p.stock <= p.stock_alert ? 'low' : '';
+          const stock = formatQuantity(p.stock, p.unit); // au poids : en kg
           return (
             <button key={p.id} type="button" className={`tile ${level}`} onClick={() => onAdd(p)} title={p.code}>
               <span className="thumb" style={thumbColors(p.category_id)}>
@@ -54,9 +55,9 @@ export function ProductGrid({ products, categories, brands, onAdd }: Props) {
               <span className="name">{p.name}</span>
               {p.name_ar && <span className="name-ar" dir="rtl" lang="ar">{p.name_ar}</span>}
               <span className="tile-foot">
-                <strong className="price">{formatMad(p.price_ttc)}</strong>
+                <strong className="price">{unitPrice(p.price_ttc, p.unit)}</strong>
                 <span className={`stock ${level}`}>
-                  {level === 'out' ? 'Rupture' : level === 'low' ? `Stock bas : ${p.stock}` : `Stock ${p.stock}`}
+                  {level === 'out' ? 'Rupture' : level === 'low' ? `Stock bas : ${stock}` : `Stock ${stock}`}
                 </span>
               </span>
             </button>

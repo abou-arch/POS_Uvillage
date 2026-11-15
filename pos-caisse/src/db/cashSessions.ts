@@ -6,7 +6,7 @@ import {
   closedSession, isLocalMovement, isLocalSession, openedSession, sessionsToPrune, type LocalCashMovement, type LocalCashSession,
 } from '../lib/cashSession';
 import { isRefund } from '../lib/buildRefund';
-import { buildSessionReceipt, type SessionReceipt } from '../lib/receipt';
+import { buildSessionReceipt, type ReceiptData, type SessionReceipt } from '../lib/receipt';
 import { isSale } from '../state/sales';
 import { closeKey, isOutboxItem, itemSession } from '../sync/sync';
 import type { CashMovement, CashSession, CashSessionClosing, CashSessionOpening, Refund, Sale } from '../types';
@@ -65,6 +65,12 @@ export async function cashSessionData(sessionId: string): Promise<CashSessionDat
     movements: movements.filter(isLocalMovement),
     refunds: refunds.map((row) => row.refund).filter(isRefund).sort(byDate),
   };
+}
+
+/** Tickets de la session (vente, caissier et client), pour les retrouver et les réimprimer. Une ligne abîmée est écartée. */
+export async function sessionReceipts(sessionId: string): Promise<ReceiptData[]> {
+  const rows = await db.journal.where('session_id').equals(sessionId).toArray();
+  return rows.filter((row) => isSale(row.sale)).map(({ sale, cashier, customer }) => ({ sale, cashier, customer }));
 }
 
 /** Les sessions clôturées depuis plus de 31 jours et entièrement envoyées quittent le poste, avec leurs ventes et retours. */

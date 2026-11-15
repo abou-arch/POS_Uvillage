@@ -19,7 +19,7 @@ function memoryStorage(initial: Record<string, string> = {}) {
 }
 
 const line = (product_id: string, name: string, quantity: number, unit_price_ttc: number, tva_rate: number, discount = 0): CartLine =>
-  ({ product_id, name, quantity, unit_price_ttc, discount, tva_rate, stock: 100 });
+  ({ product_id, name, unit: Number.isInteger(quantity) ? 'unit' : 'kg', quantity, unit_price_ttc, discount, tva_rate, stock: 100 });
 const client: Customer = { id: 'c_1', name: 'Fatima Zahra', phone: null, matricule: '2024001' };
 
 // Pain à 0 % et thon à 20 % : le cas du critère de l'étape 5.
@@ -55,6 +55,15 @@ describe('ticket', () => {
       { name: 'PAIN NORMAL', detail: `2 × ${mad(150)}`, discount: null, total: mad(300) },
       { name: 'THON ISABEL TOMATE', detail: `1 × ${mad(1000)}`, discount: `-${mad(100)}`, total: mad(900) },
     ]);
+  });
+
+  it('article au poids (contrat 0.7) : « 0,750 kg × 25,00 DH/kg » ; vente d’avant 0.7 sans unité : déduite de la quantité', () => {
+    const base = sale({ payments: [{ method: 'cash', amount: 1200 }], amountReceived: 1200 });
+    const weighed = { ...base, lines: [{ ...base.lines[0], unit: 'kg' as const, quantity: 0.75, unit_price_ttc: 2500 }] };
+    expect(buildReceipt({ sale: weighed, cashier: 'Caissier', customer: null }, store, 'UTC').lines[0].detail).toBe(`0,750 kg × ${mad(2500)}/kg`);
+    const { unit: _u, ...old } = weighed.lines[0];
+    expect(buildReceipt({ sale: { ...weighed, lines: [old] }, cashier: 'Caissier', customer: null }, store, 'UTC').lines[0].detail)
+      .toBe(`0,750 kg × ${mad(2500)}/kg`);
   });
 
   it('récapitulatif TVA juste pour un panier à 0 % + 20 %', () => {

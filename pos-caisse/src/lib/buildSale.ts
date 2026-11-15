@@ -1,7 +1,9 @@
 // Construction de la vente envoyée à l'API, exactement selon le §5 du contrat. Fonction pure : tout est testé.
 import type { CartState } from '../state/cart';
 import { cashError, paymentsError } from '../state/payment';
+import { quantityError } from '../state/cart';
 import type { Payment, Product, Sale, SaleLine } from '../types';
+import { lineUnit } from './units';
 import { lineTotals, saleTotals } from './totals.js';
 
 export interface SaleInput {
@@ -33,6 +35,10 @@ export function buildSale(input: SaleInput): Sale {
   if (input.lineIds.length !== cart.lines.length || new Set(input.lineIds).size !== cart.lines.length) {
     throw new Error('Identifiants de lignes invalides.');
   }
+  for (const l of cart.lines) {
+    const quantity = quantityError(lineUnit(l), l.quantity);
+    if (quantity) throw new Error(`${l.name} : ${quantity}`);
+  }
   const totals = saleTotals(cart.lines, cart.otherCharges, cart.globalDiscount);
   const cashPaid = payments.filter((p) => p.method === 'cash').reduce((s, p) => s + p.amount, 0);
   const error = paymentsError(totals.ttc, payments, cart.customer !== null)
@@ -42,7 +48,7 @@ export function buildSale(input: SaleInput): Sale {
   const lines: SaleLine[] = cart.lines.map((l, i) => {
     const t = lineTotals(l.quantity, l.unit_price_ttc, l.discount, l.tva_rate);
     return {
-      id: input.lineIds[i], product_id: l.product_id, name: l.name, quantity: l.quantity, unit_price_ttc: l.unit_price_ttc,
+      id: input.lineIds[i], product_id: l.product_id, name: l.name, unit: lineUnit(l), quantity: l.quantity, unit_price_ttc: l.unit_price_ttc,
       discount: l.discount, tva_rate: l.tva_rate, total_ht: t.ht, total_tva: t.tva, total_ttc: t.ttc,
     };
   });

@@ -1,6 +1,7 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import { AUTO_PRINT, storeInfo, TIME_ZONE } from '../config/store';
 import { useApprovers } from '../db/approvers';
+import { useBarcodeRules } from '../db/barcodeRules';
 import { cachedProducts } from '../db/catalog';
 import { cashSessionData, closeCashSession, recordCashMovement, sessionReceipt } from '../db/cashSessions';
 import { db } from '../db/db';
@@ -28,7 +29,7 @@ import { closingThreshold, discountLimits, placeOf } from '../state/session';
 import { useHeldSales } from '../state/useHeldSales';
 import { usePrint } from '../state/usePrint';
 import type { SyncState } from '../sync/useSync';
-import type { Approver, CashCountLine, CashMovementType, Payment, Sale, Session } from '../types';
+import type { Approver, CashCountLine, CashMovementType, Payment, Product, Sale, Session } from '../types';
 import { ApprovalModal } from './ApprovalModal';
 import { Cart } from './Cart';
 import { CashMovementModal } from './CashMovementModal';
@@ -39,6 +40,8 @@ import { ProductGrid } from './ProductGrid';
 import { SessionModal } from './SessionModal';
 import { PrintSheet } from './Ticket';
 import { SyncBanners, TopBar } from './TopBar';
+import { TicketsModal } from './TicketsModal';
+import { WeightModal } from './WeightModal';
 import { Icon } from './ui';
 
 type SessionView = 'menu' | 'movement' | 'close';
@@ -65,7 +68,8 @@ export function PosScreen({ session, cashSession, sync, unreadableSessions, onCl
   const [showHeld, setShowHeld] = useState(false);
   const [sessionView, setSessionView] = useState<SessionView | null>(null);
   const [resumeNotice, setResumeNotice] = useState<string | null>(null);
-  const [refunding, setRefunding] = useState(false);
+  const [refunding, setRefunding] = useState<string | null>(null); // numéro du ticket à retourner ('' : à taper)
+  const [showTickets, setShowTickets] = useState(false);
   const [refundDone, setRefundDone] = useState<RefundReceiptData | null>(null); // dernier retour : message et réimpression
   const held = useHeldSales(session.registerId);
   const [receipt, setReceipt] = useState(() => loadLastReceipt(session.registerId));
@@ -74,6 +78,8 @@ export function PosScreen({ session, cashSession, sync, unreadableSessions, onCl
   const checkingOut = useRef(false); // un double appui sur F4 ne crée pas deux ventes
   const [approval, setApproval] = useState<ApprovalRequest | null>(null);
   const approvers = useApprovers(session.storeId);
+  const barcodeRules = useBarcodeRules(session.storeId);
+  const [weighing, setWeighing] = useState<Product | null>(null); // article au poids dont le caissier tape le poids
   const limits = discountLimits(session);
   const role = session.user.role;
   // Remises d'un caissier au-delà du plafond (§11) : signalées dans le panier, autorisées par un responsable au paiement.
@@ -233,6 +239,13 @@ export function PosScreen({ session, cashSession, sync, unreadableSessions, onCl
     dispatch(action);
   }
 
+  // Article choisi sans étiquette de balance (tuile, code, nom) : au poids, le caissier tape d'abord le poids (§1).
+  function pick(product: Product) {
+    if (product.unit === 'kg') setWeighing(product);
+    else cartDispatch({ type: 'add', product });
+  }
+  const closeWeighing = () => { setWeighing(null); document.getElementById('scan')?.focus(); };
+
   // --- Retours (§10) -------------------------------------------------------------------------------------
 
   // Le retour est écrit sur la caisse et dans l'outbox (stock remonté) avant d'être envoyé. Les retours de la vente déjà
@@ -259,7 +272,7 @@ export function PosScreen({ session, cashSession, sync, unreadableSessions, onCl
     sync.sync();
     const data = { refund, ...names };
     setRefundDone(data);
-    setRefunding(false);
+    setRefunding(null);
     if (AUTO_PRINT) printRefund(data, false);
     document.getElementById('scan')?.focus();
     return null;
@@ -337,9 +350,13 @@ export function PosScreen({ session, cashSession, sync, unreadableSessions, onCl
   return (
     <div className="pos">
       <TopBar session={session} sync={sync} onLogout={onLogout}>
-        <button className="held-button" disabled={!sessionReady} onClick={() => { setRefundDone(null); setRefunding(true); }}
+        <button className="held-button" disabled={!sessionReady} onClick={() => { setRefundDone(null); setRefunding(''); }}
           aria-label="Retour d’articles et remboursement" title="Retour d’articles : retrouver le ticket, rembourser">
           <Icon name="swap" size={18} /><span className="label">Retour</span>
+        </button>
+        <button className="held-button" disabled={!sessionReady} onClick={() => setShowTickets(true)}
+          aria-label="Tickets de la session : rechercher, réimprimer, retour" title="Tickets de la session : rechercher, réimprimer, retour">
+          <Icon name="receipt" size={18} /><span className="label">Tickets</span>
         </button>
         <button className="held-button" disabled={!sessionReady} onClick={() => setSessionView('menu')}
           aria-label="Session de caisse : entrées et sorties d’espèces, rapport X, clôture" title="Entrée / sortie d’espèces, rapport X, clôture">
@@ -384,14 +401,19 @@ export function PosScreen({ session, cashSession, sync, unreadableSessions, onCl
       )}
       <SyncBanners sync={sync} unreadable={unreadable} />
       <main>
-        <Cart cart={cart} dispatch={cartDispatch} products={products.value} lastSale={lastSale && lastSaleView(lastSale)}
+        <Cart cart={cart} dispatch={cartDispatch} products={products.value} barcodeRules={barcodeRules} onPick={pick}
+          lastSale={lastSale && lastSaleView(lastSale)}
           overLimit={overLimit} onCheckout={checkout} onHold={hold} />
         <ProductGrid products={products.value} categories={categories} brands={brands}
           onAdd={(product) => {
-            cartDispatch({ type: 'add', product });
+            pick(product);
             document.getElementById('scan')?.focus(); // la douchette reste prête après un clic sur une tuile
           }} />
       </main>
+      {weighing && (
+        <WeightModal product={weighing} onClose={closeWeighing}
+          onAdd={(quantity) => { cartDispatch({ type: 'add', product: weighing, quantity }); closeWeighing(); }} />
+      )}
       {showHeld && (
         <HeldListModal list={held.list} cartEmpty={cart.lines.length === 0} onResume={resume}
           onDelete={(id) => void deleteHeld(id)}
@@ -411,9 +433,14 @@ export function PosScreen({ session, cashSession, sync, unreadableSessions, onCl
           onShowHeld={held.list.length > 0 ? () => { setSessionView(null); setShowHeld(true); } : null}
           onConfirm={closeSession} onClose={closeSessionView} />
       )}
-      {sessionReady && refunding && (
-        <RefundModal storeId={session.storeId} cashAvailable={expected.cash} onSave={saveRefund}
-          onClose={() => { setRefunding(false); document.getElementById('scan')?.focus(); }} />
+      {sessionReady && showTickets && (
+        <TicketsModal sessionId={cashSession.id} outbox={sync.outbox} refunds={refunds} onReprint={(data) => printSale(data, true)}
+          onRefund={(number) => { setShowTickets(false); setRefundDone(null); setRefunding(number); }}
+          onClose={() => { setShowTickets(false); document.getElementById('scan')?.focus(); }} />
+      )}
+      {sessionReady && refunding !== null && (
+        <RefundModal storeId={session.storeId} initialNumber={refunding} cashAvailable={expected.cash} onSave={saveRefund}
+          onClose={() => { setRefunding(null); document.getElementById('scan')?.focus(); }} />
       )}
       {approval && (
         <ApprovalModal action={approval.action} detail={approval.detail} approvers={approvers.list}

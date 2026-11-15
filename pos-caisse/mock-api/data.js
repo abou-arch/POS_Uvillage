@@ -30,6 +30,7 @@ export const categories = [
   { id: 'cat_6', name: 'Chips', name_ar: 'رقائق البطاطا' },
   { id: 'cat_7', name: 'Épicerie sucrée', name_ar: 'مواد البقالة الحلوة' },
   { id: 'cat_8', name: 'Électronique', name_ar: 'إلكترونيات' },
+  { id: 'cat_9', name: 'Au poids', name_ar: 'بالوزن' },
 ];
 
 export const brands = [
@@ -40,8 +41,9 @@ export const brands = [
   { id: 'br_5', name: 'Ain Atlas' },
 ];
 
-const p = (n, code, barcode, name, name_ar, category_id, brand_id, price_ttc, tva_rate, stock, expiry_date = null) => ({
-  id: `p_${n}`, code, barcode, name, name_ar, category_id, brand_id, price_ttc, tva_rate,
+// unit (contrat 0.7) : 'unit' à la pièce ; 'kg' au poids, avec price_ttc le prix d'un kg et le stock en kg.
+const p = (n, code, barcode, name, name_ar, category_id, brand_id, price_ttc, tva_rate, stock, expiry_date = null, unit = 'unit') => ({
+  id: `p_${n}`, code, barcode, name, name_ar, category_id, brand_id, price_ttc, tva_rate, unit,
   image_url: null, stock_alert: 5, expiry_date, active: true,
   updated_at: '2026-10-04T10:00:00Z',
   stock_by_store: { st_1: stock, st_2: Math.floor(stock / 2) },
@@ -67,7 +69,20 @@ export const products = [
   p(17, 'IT0018', '6110000000189', 'SOLIS TOMATE 200G', null, 'cat_3', 'br_3', 600, 20, 3, '2026-07-01'),
   p(18, 'IT0040', '6110000000400', 'ORAIMO FREEPODS 3C', null, 'cat_8', 'br_2', 24900, 20, 0),
   p(19, 'IT0041', '6110000000417', 'CHARGEUR ORAIMO C53', null, 'cat_8', 'br_2', 8900, 20, 4),
+  // Au poids : le code-barres est le code de base (valeur à zéro) des règles d'exemple ci-dessous.
+  p(20, 'IT0100', '2100100000004', 'OLIVES NOIRES', 'زيتون أسود', 'cat_9', null, 2500, 20, 40, null, 'kg'),
+  p(21, 'IT0101', '2100101000003', 'TOMATES', 'طماطم', 'cat_9', null, 600, 0, 80, null, 'kg'),
+  p(22, 'IT0102', '2300102000006', 'FROMAGE À LA COUPE', 'جبن بالتقطيع', 'cat_9', null, 9000, 7, 12, null, 'kg'),
 ];
+
+// Règles des codes-barres de la balance (§3, contrat 0.7). EXEMPLE : le format réel de la balance du client reste à
+// confirmer. 21 : poids en kg sur 2 + 3 chiffres (2100100007508 = olives, 0,750 kg). 23 : prix en DH sur 3 + 2 chiffres
+// (2300102012351 = fromage à la coupe, 12,35 DH).
+const exampleRules = [
+  { prefix: '21', type: 'weight', integer_digits: 2, decimal_digits: 3 },
+  { prefix: '23', type: 'price', integer_digits: 3, decimal_digits: 2 },
+];
+export const barcodeRules = { st_1: exampleRules, st_2: exampleRules };
 
 export const customers = [
   { id: 'c_1', name: 'Ahmed', phone: '+212600000001', matricule: '2023001542' },

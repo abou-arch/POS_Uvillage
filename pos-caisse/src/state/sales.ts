@@ -1,6 +1,7 @@
 // Vérification d'une vente relue (outbox, dernier ticket) et lecture de l'ancien emplacement localStorage
 // des ventes à envoyer et des compteurs de tickets, pour la migration vers IndexedDB (db/migrate.ts).
 import { browserStorage, isId, isRecord, readJson, readText, writeJson } from '../lib/storage';
+import { fitsUnit } from '../lib/units';
 import type { Payment, PaymentMethod, Sale, SaleLine } from '../types';
 import { METHOD_LABELS } from './payment';
 
@@ -34,7 +35,8 @@ export const isPayment = (v: unknown): v is Payment => isRecord(v) && isMethod(v
 const isLine = (v: unknown): v is SaleLine =>
   isRecord(v) && (v.id === undefined || isUuid(v.id)) && isId(v.product_id) && typeof v.name === 'string' && isQuantity(v.quantity)
   && isCents(v.unit_price_ttc) && isCents(v.discount) && isRate(v.tva_rate)
-  && isCents(v.total_ht) && isCents(v.total_tva) && isCents(v.total_ttc);
+  && isCents(v.total_ht) && isCents(v.total_tva) && isCents(v.total_ttc)
+  && (v.unit === undefined || ((v.unit === 'unit' || v.unit === 'kg') && fitsUnit(v.unit, v.quantity))); // contrat 0.7
 export const isSale = (v: unknown): v is Sale =>
   isRecord(v) && isUuid(v.id) && isId(v.number)
   && isId(v.store_id) && isId(v.register_id) && isUuid(v.session_id) && isId(v.cashier_id) && isApproval(v.approved_by)

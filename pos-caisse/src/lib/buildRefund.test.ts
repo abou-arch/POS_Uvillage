@@ -8,9 +8,9 @@ import {
 import { buildSale } from './buildSale';
 
 const ahmed: Customer = { id: 'c_1', name: 'Ahmed', phone: null, matricule: null };
-const lait: CartLine = { product_id: 'p_2', name: 'LAIT 1L', quantity: 3, unit_price_ttc: 1000, discount: 300, tva_rate: 20, stock: 50 };
-const pain: CartLine = { product_id: 'p_1', name: 'PAIN NORMAL', quantity: 2, unit_price_ttc: 150, discount: 0, tva_rate: 0, stock: 60 };
-const thon: CartLine = { product_id: 'p_9', name: 'THON', quantity: 1, unit_price_ttc: 1000, discount: 0, tva_rate: 20, stock: 20 };
+const lait: CartLine = { product_id: 'p_2', name: 'LAIT 1L', unit: 'unit', quantity: 3, unit_price_ttc: 1000, discount: 300, tva_rate: 20, stock: 50 };
+const pain: CartLine = { product_id: 'p_1', name: 'PAIN NORMAL', unit: 'unit', quantity: 2, unit_price_ttc: 150, discount: 0, tva_rate: 0, stock: 60 };
+const thon: CartLine = { product_id: 'p_9', name: 'THON', unit: 'unit', quantity: 1, unit_price_ttc: 1000, discount: 0, tva_rate: 20, stock: 20 };
 const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const SESSION = '3b9d6c1e-8f2a-4d5b-9c7e-1a2b3c4d5e6f';
 
@@ -59,7 +59,7 @@ describe('montant remboursé (§7)', () => {
   it('retour partiel : 1 lait sur 3, au prorata du payé', () => {
     const r = refund(S, [], [[0, 1]]);
     expect(r.lines).toEqual([{
-      original_line_id: uuid(100), line_index: 0, product_id: 'p_2', name: 'LAIT 1L', quantity: 1, unit_price_ttc: 1000,
+      original_line_id: uuid(100), line_index: 0, product_id: 'p_2', name: 'LAIT 1L', unit: 'unit', quantity: 1, unit_price_ttc: 1000,
       tva_rate: 20, total_ht: 731, total_tva: 146, total_ttc: 877,
     }]);
     expect(r.totals).toEqual({ ht: 731, tva: 146, ttc: 877 });
@@ -102,7 +102,7 @@ describe('montant remboursé (§7)', () => {
     expect(refunds.reduce((n, r) => n + r.totals.ttc, 0)).toBe(998);
   });
   it('article au poids : 3 décimales', () => {
-    const s = sale([{ ...pain, quantity: 1.5, unit_price_ttc: 2000 }], [{ method: 'cash', amount: 3000 }]);
+    const s = sale([{ ...pain, unit: 'kg', quantity: 1.5, unit_price_ttc: 2000 }], [{ method: 'cash', amount: 3000 }]);
     const r = refund(s, [], [[0, 0.25]]);
     expect(r.lines[0]).toMatchObject({ quantity: 0.25, total_ttc: 500 });
     expect(returnableLines(s, [r])[0].remaining).toBe(1.25);
@@ -118,10 +118,10 @@ describe('remboursement proposé et contrôles des moyens (§10)', () => {
     expect(defaultRefundPayments(card, [], 0)).toEqual([]);
   });
   it('vente à crédit : le retour réduit d’abord le crédit, puis le reste par le moyen de la vente', () => {
-    const s = sale([thon], [{ method: 'card', amount: 500 }, { method: 'credit', amount: 500 }], { customer: ahmed });
+    const s = sale([{ ...thon, quantity: 2, unit_price_ttc: 500 }], [{ method: 'card', amount: 500 }, { method: 'credit', amount: 500 }], { customer: ahmed });
     expect(defaultRefundPayments(s, [], 300)).toEqual([{ method: 'credit', amount: 300 }]);
     expect(defaultRefundPayments(s, [], 800)).toEqual([{ method: 'credit', amount: 500 }, { method: 'card', amount: 300 }]);
-    const first = { ...refund(s, [], [[0, 0.5]]), payments: [{ method: 'credit' as const, amount: 500 }] };
+    const first = { ...refund(s, [], [[0, 1]]), payments: [{ method: 'credit' as const, amount: 500 }] };
     expect(creditRemaining(s, [first])).toBe(0);
     expect(defaultRefundPayments(s, [first], 500)).toEqual([{ method: 'card', amount: 500 }]);
   });
@@ -177,12 +177,29 @@ describe('document de retour (§10)', () => {
     expect(isRefund({ ...r, approved_by: '' })).toBe(false);
     expect(isRefund({ ...r, approved_by: 3 })).toBe(false);
   });
+  it('contrat 0.7 : unité de la vente recopiée, pas de 1,5 article à la pièce ; vente d’avant 0.7 sans contrôle', () => {
+    expect(quantitiesError(returnableLines(S, []), new Map([[0, 1.5]]))).toBe('LAIT 1L : article vendu à la pièce, quantité entière.');
+    expect(() => refund(S, [], [[0, 1.5]], [{ method: 'cash', amount: 1316 }])).toThrow('quantité entière');
+    expect(refund(S, [], [[0, 1]]).lines[0].unit).toBe('unit');
+    const weighed = sale([{ ...pain, unit: 'kg', quantity: 0.75, unit_price_ttc: 2500 }], [{ method: 'cash', amount: 1875 }]);
+    const r = refund(weighed, [], [[0, 0.25]]);
+    expect(r.lines[0]).toMatchObject({ unit: 'kg', quantity: 0.25 });
+    expect(isRefund(r)).toBe(true);
+    expect(quantitiesError(returnableLines(weighed, [r]), new Map([[0, 0.6]]))).toBe('PAIN NORMAL : 0,500 kg au plus à retourner.');
+    // Vente d'avant 0.7 : pas d'unité, donc pas de contrôle ; le retour n'en invente pas.
+    const old = { ...S, lines: S.lines.map(({ unit: _u, ...l }) => l) };
+    const fromOld = refund(old, [], [[1, 0.5]]);
+    expect(fromOld.lines[0]).not.toHaveProperty('unit');
+    expect(isRefund(fromOld)).toBe(true);
+  });
   it('relecture : un retour abîmé n’est pas reconnu', () => {
     const r = refund(S, [], [[0, 1]]);
     expect(isRefund({ ...r, number: 'ST2-REG3-000001' })).toBe(false);
     expect(isRefund({ ...r, reason: 'vol' })).toBe(false);
     expect(isRefund({ ...r, lines: [r.lines[0], r.lines[0]] })).toBe(false);
     expect(isRefund({ ...r, lines: [] })).toBe(false);
+    expect(isRefund({ ...r, lines: [{ ...r.lines[0], quantity: 1.5 }] })).toBe(false); // 1,5 article à la pièce
+    expect(isRefund({ ...r, lines: [{ ...r.lines[0], unit: 'litre' }] })).toBe(false);
     expect(isRefund(null)).toBe(false);
   });
 });

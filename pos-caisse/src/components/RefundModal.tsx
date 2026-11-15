@@ -1,12 +1,13 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { TIME_ZONE } from '../config/store';
 import { findSale, type FoundSale } from '../db/refunds';
 import {
-  creditRemaining, defaultRefundPayments, MAX_REASON_LENGTH, parseQuantity, quantitiesError, REASONS, reasonError, REFUND_REASONS,
+  creditRemaining, defaultRefundPayments, MAX_REASON_LENGTH, parseQuantity, quantitiesError, quantityError, REASONS, reasonError, REFUND_REASONS,
   refundLines, refundPaymentsError, refundTotals, returnableLines, saleRefundError,
 } from '../lib/buildRefund';
 import { receiptDate } from '../lib/receipt';
 import { formatMad } from '../lib/totals.js';
+import { formatQuantity, lineUnit, quantityDetail } from '../lib/units';
 import { METHOD_LABELS } from '../state/payment';
 import type { Payment, RefundReason } from '../types';
 import { Modal } from './Modal';
@@ -22,17 +23,17 @@ export interface RefundChoice {
   payments: Payment[];
 }
 
-const qty = (q: number) => q.toLocaleString('fr-FR', { maximumFractionDigits: 3 });
 
 // Retour (§10) : numéro du ticket (tapé ou scanné), puis les articles rapportés et le motif, puis le remboursement
 // dans la fenêtre de paiement en mode remboursement. Les règles sont dans lib/buildRefund.ts.
-export function RefundModal({ storeId, cashAvailable, onSave, onClose }: {
+export function RefundModal({ storeId, initialNumber = '', cashAvailable, onSave, onClose }: {
   storeId: string;
+  initialNumber?: string; // ouvert depuis la liste des tickets : la vente est cherchée tout de suite
   cashAvailable: number; // espèces attendues dans le tiroir : on ne rend pas plus
   onSave: (choice: RefundChoice) => Promise<string | null>; // erreur : rien n'est enregistré, la fenêtre reste ouverte
   onClose: () => void;
 }) {
-  const [number, setNumber] = useState('');
+  const [number, setNumber] = useState(initialNumber);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [found, setFound] = useState<FoundSale | null>(null);
@@ -47,6 +48,10 @@ export function RefundModal({ storeId, cashAvailable, onSave, onClose }: {
   async function search(e: FormEvent) {
     e.preventDefault();
     if (searching || number.trim() === '') return;
+    await lookUp(number);
+  }
+
+  async function lookUp(number: string) {
     setSearching(true);
     setSearchError(null);
     try {
@@ -63,6 +68,12 @@ export function RefundModal({ storeId, cashAvailable, onSave, onClose }: {
       setSearching(false);
     }
   }
+
+  // Ouvert depuis un ticket : une seule recherche, à l'ouverture.
+  useEffect(() => {
+    if (initialNumber) void lookUp(initialNumber);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- seulement à l'ouverture de la fenêtre
+  }, []);
 
   if (!found) {
     return (
@@ -91,11 +102,12 @@ export function RefundModal({ storeId, cashAvailable, onSave, onClose }: {
   const { sale, refunds } = found;
   const blocked = saleRefundError(sale, storeId);
   const rows = returnableLines(sale, refunds);
-  const quantityTooHigh = (index: number, q: number) => q > (rows.find((r) => r.index === index)?.remaining ?? 0);
+  // Quantité refusée : plus que ce qui reste, ou 1,5 d'un article vendu à la pièce (contrat 0.7).
+  const refused = (index: number, q: number) => { const row = rows.find((r) => r.index === index); return !row || quantityError(row, q) !== null; };
   const read = new Map<number, number | null>(
     Object.entries(texts).filter(([, t]) => t.trim() !== '').map(([i, t]) => [Number(i), parseQuantity(t)]),
   );
-  const valid = new Map([...read].filter((e): e is [number, number] => e[1] !== null && !quantityTooHigh(e[0], e[1])));
+  const valid = new Map([...read].filter((e): e is [number, number] => e[1] !== null && !refused(e[0], e[1])));
   const lines = refundLines(rows, valid);
   const total = refundTotals(lines).ttc;
   const error = blocked ?? quantitiesError(rows, read) ?? reasonError(reason, reasonText);
@@ -151,13 +163,15 @@ export function RefundModal({ storeId, cashAvailable, onSave, onClose }: {
               {rows.map((row) => {
                 const text = texts[row.index] ?? '';
                 const q = read.get(row.index);
-                const invalid = text.trim() !== '' && (q === null || (q !== undefined && quantityTooHigh(row.index, q)));
+                const invalid = text.trim() !== '' && (q === null || (q !== undefined && refused(row.index, q)));
+                const unit = lineUnit(row.line);
+                const qty = (n: number) => formatQuantity(n, unit);
                 const amount = lines.find((l) => l.line_index === row.index)?.total_ttc;
                 return (
                   <tr key={row.index} className={row.remaining === 0 ? 'done' : ''}>
                     <td>
                       <strong>{row.line.name}</strong>
-                      <small>{qty(row.sold)} × {formatMad(row.line.unit_price_ttc)}{row.line.discount > 0 ? ` − ${formatMad(row.line.discount)}` : ''} · payé {formatMad(row.paid)}</small>
+                      <small>{quantityDetail(row.sold, row.line.unit_price_ttc, unit)}{row.line.discount > 0 ? ` − ${formatMad(row.line.discount)}` : ''} · payé {formatMad(row.paid)}</small>
                     </td>
                     <td>{qty(row.sold)}</td>
                     <td>{qty(row.returned)}</td>

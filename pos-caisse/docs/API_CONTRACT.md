@@ -1,10 +1,16 @@
 # Contrat d'API — Caisse (POS) ↔ Application web
 
-Version 0.6 — proposition à valider par l'équipe.
+Version 0.7 — proposition à valider par l'équipe.
 
 Changements par version :
 
-- **0.6** : droits du caissier et autorisation d'un responsable.
+- **0.7** : articles au poids et codes-barres de balance.
+  - §1 : quantité entière pour un article à la pièce, 3 décimales au plus pour un article au kg.
+  - §3 : champ `unit` de l'article (`unit` ou `kg`). Pour un article au kg, `price_ttc` est le prix d'un kg, `stock` est en kg et `barcode` est son code de base.
+  - §3 : nouvelle route `GET /api/stores/{store_id}/barcode-rules` (règles des codes-barres de la balance du magasin).
+  - §5 et §10 : `unit` sur chaque ligne de vente et de retour ; quantité entière sur une ligne `unit`.
+  - §8 : deux nouveaux points (11 et 12).
+- 0.6 : droits du caissier et autorisation d'un responsable.
   - §2 : plafond de remise d'un caissier, par magasin (`cashier_max_discount_percent`, `cashier_max_discount`).
   - Nouveau §11 : opérations qu'un caissier ne fait pas seul. Un responsable les autorise avec son code PIN, vérifié par la caisse même hors ligne grâce à l'empreinte téléchargée par `GET /api/stores/{store_id}/approvers`.
   - §5, §9, §10 : champ `approved_by` (qui a autorisé) dans la vente, le mouvement d'espèces, la clôture et le retour.
@@ -31,7 +37,7 @@ La caisse (POS) est développée séparément de l'application web (back-office)
 | Montants | **Entiers en centimes de dirham** (`1250` = 12,50 MAD). Jamais de flottants pour l'argent. |
 | Prix des articles | Stockés **TTC**. Le HT et la TVA sont recalculés à partir du taux. |
 | Taux de TVA | Pourcentage entier par article (`20`, `14`, `10`, `7`, `0`). Liste exacte à confirmer avec le comptable du client. |
-| Quantités | Décimales autorisées (articles au poids), 3 décimales max. |
+| Quantités | Entières pour un article vendu à la pièce (`unit`). Pour un article au poids (`kg`) : en kg, 3 décimales max. |
 | Dates | ISO 8601 en UTC (`2026-10-05T14:32:10Z`). |
 | Identifiants des ventes, lignes de vente, retours, sessions de caisse et mouvements d'espèces | **UUID v4 générés par la caisse** (indispensable pour le hors ligne). |
 | Langues | Les libellés ont une version FR et une version AR facultative. |
@@ -105,6 +111,7 @@ Rôles attendus côté caisse : `admin`, `manager`, `cashier`. Un caissier ne vo
     "brand_id": null,
     "price_ttc": 100,
     "tva_rate": 20,
+    "unit": "unit",
     "image_url": "https://…/mille-feuille.jpg",
     "stock": 4504,
     "stock_alert": 10,
@@ -116,6 +123,38 @@ Rôles attendus côté caisse : `admin`, `manager`, `cashier`. Un caissier ne vo
 ```
 
 `stock` est le stock **du magasin demandé**. Un article désactivé est renvoyé avec `active: false` pour que la caisse le retire de son cache.
+
+`unit` (obligatoire) : `unit` pour un article vendu à la pièce, `kg` pour un article vendu au poids. Pour un article `kg` :
+
+- `price_ttc` est le prix TTC d'**un kg** ;
+- `stock` est en kg, 3 décimales au plus ;
+- `barcode` est son **code de base** : le code-barres de la balance avec des zéros à la place de la valeur (poids ou prix), et le chiffre de contrôle recalculé (voir ci-dessous). `null` si l'article ne passe pas par la balance.
+
+### `GET /api/stores/{store_id}/barcode-rules`
+
+Règles des codes-barres imprimés par la balance du magasin. La caisse s'en sert pour lire le code d'un article pesé.
+
+```json
+{
+  "rules": [
+    { "prefix": "21", "type": "weight", "integer_digits": 2, "decimal_digits": 3 },
+    { "prefix": "23", "type": "price", "integer_digits": 3, "decimal_digits": 2 }
+  ]
+}
+```
+
+Les valeurs ci-dessus sont un exemple : **le format de la balance du client reste à confirmer**.
+
+- Codes EAN-13 seulement (13 chiffres, le dernier est le chiffre de contrôle). Un code au chiffre de contrôle faux est refusé.
+- Un code se lit dans l'ordre : `prefix`, puis le code article, puis la valeur (`integer_digits` chiffres entiers et `decimal_digits` décimales), puis le chiffre de contrôle. Le code article a donc 12 − longueur du préfixe − `integer_digits` − `decimal_digits` chiffres, au moins 1.
+- `type` :
+  - `weight` : la valeur est le poids en kg (`decimal_digits` ≤ 3). La quantité vendue est ce poids.
+  - `price` : la valeur est le prix TTC en DH (`decimal_digits` ≤ 2). La quantité vendue est ce prix divisé par le prix au kg de l'article, arrondie à 3 décimales (voir §8, point 11).
+- Pour retrouver l'article, la caisse remplace la valeur par des zéros et recalcule le chiffre de contrôle : c'est le code de base, cherché dans les `barcode` du catalogue.
+- Un code de balance ne vise qu'un article `kg` ; la caisse refuse un code qui mène à un article `unit`.
+- Un préfixe n'est jamais le début d'un autre. Une liste vide veut dire que le magasin n'a pas de balance.
+- La caisse garde ces règles pour travailler hors ligne et les met à jour avec le catalogue.
+- Magasin qui n'est pas dans les `store_ids` de l'utilisateur → `403 FORBIDDEN`.
 
 ## 4. Clients
 
@@ -161,6 +200,7 @@ Crée une vente. **Idempotent** : si une vente avec le même `id` existe déjà,
       "id": "5d2e8f1a-7b3c-4e9d-8a6f-1c2b3d4e5f60",
       "product_id": "p_6",
       "name": "MILLE FEUILLE",
+      "unit": "unit",
       "quantity": 2,
       "unit_price_ttc": 100,
       "discount": 0,
@@ -195,6 +235,9 @@ Règles :
   - Une session inconnue de l'API est refusée (`422 SESSION_UNKNOWN`).
   - Si la session est déjà clôturée, l'API **accepte la vente** et la signale (`session_closed: true`), car la vente a eu lieu. Ce cas n'arrive que pour une vente refusée puis renvoyée après la clôture (§9).
 - `approved_by` : le responsable qui a autorisé une remise au-delà du plafond du caissier (§11), ou `null`.
+- `lines[].unit` : l'unité de l'article au moment de la vente (§3), recopiée par la caisse.
+  - `unit` : `quantity` entière. `kg` : `quantity` en kg, 3 décimales au plus, et `unit_price_ttc` est le prix d'un kg. Sinon `400 INVALID_DATA`.
+  - Les ventes envoyées avant la version 0.7 n'ont pas d'`unit` : l'API les accepte telles quelles.
 
 Réponse `201` (ou `200` si déjà reçue) :
 
@@ -301,6 +344,8 @@ Implémentation de référence : `src/lib/totals.js` (`paidByLine`, `refundLine`
 8. Retours : un article retourné comme défectueux est-il remis dans le stock vendable ? Pour l'instant, l'API remet le stock de tout article retourné (§10).
 9. Retours à crédit : si le client a déjà réglé sa dette, un retour en `credit` la rend négative. Faut-il alors rembourser en espèces ?
 10. PIN des responsables (§11) : qui le fixe et le change dans le back-office ? Longueur (6 chiffres proposés) ? Changement obligatoire au départ d'un responsable ?
+11. Code-barres de prix de la balance (§3) : la caisse facture la quantité arrondie à 3 décimales × le prix au kg. Le total de la ligne peut donc différer de quelques centimes du prix imprimé sur l'étiquette (au plus 0,05 DH pour un article à 100 DH/kg). À valider avec le comptable.
+12. Balance : qui y envoie les prix au kg, pour qu'ils restent ceux du catalogue ? Format exact des codes-barres (préfixes, poids ou prix, nombre de chiffres) à fournir pour les règles du §3.
 
 ## 9. Sessions de caisse
 
@@ -503,6 +548,7 @@ L'exemple ci-dessous reprend celui du §7 : 1 des 3 jus vendus à 10 DH, sur une
       "line_index": 0,
       "product_id": "p_9",
       "name": "JUS D'ORANGE 1L",
+      "unit": "unit",
       "quantity": 1,
       "unit_price_ttc": 1000,
       "tva_rate": 20,
@@ -532,8 +578,8 @@ Règles :
 - `lines` : au moins une ligne. Chaque ligne de la vente d'origine apparaît au plus une fois. Sinon `400`.
   - `line_index` : position de la ligne dans les `lines` de la vente d'origine (0 pour la première), toujours renseigné.
   - `original_line_id` : l'`id` de cette ligne, ou `null` pour une vente envoyée avant la version 0.5 (§5). S'il ne correspond pas à `line_index`, l'API refuse (`422 LINE_MISMATCH`).
-  - `product_id`, `name`, `unit_price_ttc` et `tva_rate` sont ceux de la ligne d'origine.
-  - `quantity` : > 0, 3 décimales au plus. Elle ne doit pas dépasser ce qui reste à retourner sur la ligne : la quantité vendue moins les retours déjà reçus, de toutes les caisses. Sinon `422 RETURN_EXCEEDS`, avec `details: { "line_index": 0, "remaining": 2 }`.
+  - `product_id`, `name`, `unit`, `unit_price_ttc` et `tva_rate` sont ceux de la ligne d'origine. `unit` est absent si la ligne d'origine n'en a pas (vente d'avant la version 0.7).
+  - `quantity` : > 0, 3 décimales au plus, entière sur une ligne `unit` (sinon `400`). Elle ne doit pas dépasser ce qui reste à retourner sur la ligne : la quantité vendue moins les retours déjà reçus, de toutes les caisses. Sinon `422 RETURN_EXCEEDS`, avec `details: { "line_index": 0, "remaining": 2 }`.
   - `total_ht`, `total_tva`, `total_ttc` : calculés avec la règle du §7 (« Montant remboursé lors d'un retour »).
 - L'API recalcule chaque ligne à partir des retours qu'elle a déjà reçus et refuse un écart de plus d'1 centime (`422 TOTALS_MISMATCH`).
   - Cette tolérance couvre deux retours de la même ligne faits hors ligne sur deux caisses, qui ne se voyaient pas.

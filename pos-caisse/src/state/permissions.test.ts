@@ -8,7 +8,7 @@ import {
 } from './permissions';
 
 const line = (product_id: string, quantity: number, unit_price_ttc: number, discount = 0): CartLine =>
-  ({ product_id, name: product_id.toUpperCase(), quantity, unit_price_ttc, discount, tva_rate: 20, stock: 100 });
+  ({ product_id, name: product_id.toUpperCase(), unit: Number.isInteger(quantity) ? 'unit' : 'kg', quantity, unit_price_ttc, discount, tva_rate: 20, stock: 100 });
 const cart = (lines: CartLine[], extra: Partial<CartState> = {}): CartState => ({ ...emptyCart, lines, ...extra });
 const LIMITS: DiscountLimits = { percent: 10, amount: 5000 }; // 10 % et 50 DH
 

@@ -6,6 +6,7 @@ import type { CashMovement, Refund, Sale } from '../types';
 import { REFUND_REASONS } from './buildRefund';
 import { COUNTED_METHODS, denominationLabel, MOVEMENT_LABELS, sessionReport, type LocalCashMovement, type LocalCashSession } from './cashSession';
 import { formatMad, vatBreakdownOfLines } from './totals.js';
+import { lineUnit, quantityDetail } from './units';
 
 /** Ce qu'il faut garder pour (ré)imprimer un ticket : la vente, et les noms qu'elle ne contient pas. */
 export interface ReceiptData { sale: Sale; cashier: string; customer: string | null }
@@ -25,8 +26,6 @@ export interface Receipt {
   payments: ReceiptRow[];
   cancelled: boolean;
 }
-
-const quantity = (q: number) => q.toLocaleString('fr-FR', { maximumFractionDigits: 3 });
 
 /** Date et heure de la vente, dans le fuseau du magasin : « 22/10/2026 20:05 ». */
 export function receiptDate(iso: string, timeZone: string): string {
@@ -54,7 +53,7 @@ export function buildReceipt({ sale, cashier, customer }: ReceiptData, store: St
     customer: customer ?? 'Client de passage',
     lines: sale.lines.map((l) => ({
       name: l.name,
-      detail: `${quantity(l.quantity)} × ${formatMad(l.unit_price_ttc)}`,
+      detail: quantityDetail(l.quantity, l.unit_price_ttc, lineUnit(l)), // « 2 × 1,50 DH », « 0,750 kg × 25,00 DH/kg »
       discount: l.discount > 0 ? `-${formatMad(l.discount)}` : null,
       total: formatMad(l.total_ttc),
     })),
@@ -266,7 +265,7 @@ export function buildRefundReceipt(data: RefundReceiptData, store: StoreInfo, ti
     ],
     reason: refund.reason_text ? `${REFUND_REASONS[refund.reason]} : ${refund.reason_text}` : REFUND_REASONS[refund.reason],
     lines: refund.lines.map((l) => ({
-      name: l.name, detail: `${quantity(l.quantity)} × ${formatMad(l.unit_price_ttc)}`, total: `-${formatMad(l.total_ttc)}`,
+      name: l.name, detail: quantityDetail(l.quantity, l.unit_price_ttc, lineUnit(l)), total: `-${formatMad(l.total_ttc)}`,
     })),
     vat: [...byRate].sort((a, b) => b[0] - a[0])
       .map(([rate, g]) => ({ rate: `${rate} %`, ht: formatMad(g.ht), tva: formatMad(g.tva) })),

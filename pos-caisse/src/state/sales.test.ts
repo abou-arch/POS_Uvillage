@@ -16,7 +16,7 @@ function memoryStorage(initial: Record<string, string> = {}) {
 }
 const stored = (value: unknown) => memoryStorage({ 'pos.pendingSales': JSON.stringify(value) });
 
-const thon: CartLine = { product_id: 'p_9', name: 'THON ISABEL TOMATE', quantity: 1, unit_price_ttc: 1000, discount: 0, tva_rate: 20, stock: 20 };
+const thon: CartLine = { product_id: 'p_9', name: 'THON ISABEL TOMATE', unit: 'unit', quantity: 1, unit_price_ttc: 1000, discount: 0, tva_rate: 20, stock: 20 };
 const sale = buildSale({
   cart: { ...emptyCart, lines: [thon] }, storeId: 'st_2', registerId: 'reg_3', sessionId: '3b9d6c1e-8f2a-4d5b-9c7e-1a2b3c4d5e6f', cashierId: 'u_2',
   payments: [{ method: 'cash', amount: 1000 }], amountReceived: 2000,
@@ -31,8 +31,8 @@ describe('ventes gardées sur la caisse', () => {
     expect(loadPending(storage)).toEqual(queue);
   });
   it('relit toute vente construite par la caisse : poids, client, SMS, charges, remise, paiement mixte', () => {
-    const olives: CartLine = { product_id: 'p_5', name: 'OLIVES NOIRES', quantity: 0.375, unit_price_ttc: 2150, discount: 100, tva_rate: 7, stock: 1.5 };
-    const pain: CartLine = { product_id: 'p_1', name: 'PAIN NORMAL', quantity: 2, unit_price_ttc: 150, discount: 0, tva_rate: 0, stock: 60 };
+    const olives: CartLine = { product_id: 'p_5', name: 'OLIVES NOIRES', unit: 'kg', quantity: 0.375, unit_price_ttc: 2150, discount: 100, tva_rate: 7, stock: 1.5 };
+    const pain: CartLine = { product_id: 'p_1', name: 'PAIN NORMAL', unit: 'unit', quantity: 2, unit_price_ttc: 150, discount: 0, tva_rate: 0, stock: 60 };
     const ahmed: Customer = { id: 'c_1', name: 'Ahmed', phone: '+212600000001', matricule: null };
     const cart: CartState = { lines: [olives, pain, thon], customer: ahmed, otherCharges: 200, globalDiscount: 50, sendSms: true };
     const { ttc } = saleTotals(cart.lines, cart.otherCharges, cart.globalDiscount);
@@ -44,6 +44,10 @@ describe('ventes gardées sur la caisse', () => {
     const storage = memoryStorage();
     savePending({ sales: [{ sale: mixed, error: null }], unreadable: [] }, storage);
     expect(loadPending(storage)).toEqual({ sales: [{ sale: mixed, error: null }], unreadable: [] });
+  });
+  it('relit une vente d’avant le contrat 0.7 : lignes sans unité', () => {
+    const before07 = { ...sale, lines: sale.lines.map(({ unit: _u, ...l }) => l) };
+    expect(loadPending(stored([{ sale: before07, error: null }])).sales).toHaveLength(1);
   });
   it('relit une vente autorisée par un responsable, et une vente d’avant le contrat 0.6 sans approved_by', () => {
     const { approved_by: _a, ...before06 } = sale;
@@ -82,6 +86,8 @@ describe('ventes gardées sur la caisse', () => {
       { send_sms: 'oui' },
       { status: 'pending' },
       { approved_by: '' }, // ni null ni un id (§11)
+      { lines: [{ ...line, quantity: 1.5 }] }, // article à la pièce : quantité entière (contrat 0.7)
+      { lines: [{ ...line, unit: 'litre' }] },
       { approved_by: 3 },
     ];
     for (const change of changes) {

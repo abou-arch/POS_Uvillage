@@ -91,4 +91,6 @@ db.version(4).stores({
 
 export const counterKey = (registerId: string) => `ticketCounter.${registerId}`;
 export const refundCounterKey = (registerId: string) => `refundCounter.${registerId}`;
-export const catalogSyncKey = (storeId: string) => `catalogSync.${storeId}`;
+// « v07 » : le contrat 0.7 ajoute l'unité aux articles ; une nouvelle clé force un téléchargement complet du catalogue.
+export const catalogSyncKey = (storeId: string) => `catalogSync.v07.${storeId}`;
+export const barcodeRulesKey = (storeId: string) => `barcodeRules.${storeId}`;

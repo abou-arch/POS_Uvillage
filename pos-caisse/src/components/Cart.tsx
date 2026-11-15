@@ -1,34 +1,37 @@
 import { useEffect, useRef, useState, type Dispatch, type FormEvent } from 'react';
+import { lookupScan } from '../lib/scan';
 import { formatMad, lineTotals, saleTotals } from '../lib/totals.js';
-import { canSendSms, type CartAction, type CartState } from '../state/cart';
+import { formatQuantity, lineUnit, unitPrice } from '../lib/units';
+import { articleCount, canSendSms, type CartAction, type CartState } from '../state/cart';
 import type { DiscountExcess } from '../state/permissions';
 import type { LastSale } from '../state/sales';
-import type { Payment, Product } from '../types';
+import type { BarcodeRule, Payment, Product } from '../types';
 import { CashModal } from './CashModal';
 import { CustomerPicker } from './CustomerPicker';
 import { HoldModal } from './HoldModal';
 import { LastSalePanel } from './LastSalePanel';
 import { MultiPaymentModal } from './MultiPaymentModal';
+import { QuantityField } from './QuantityField';
 import { Icon } from './ui';
 
 interface Props {
   cart: CartState;
   dispatch: Dispatch<CartAction>;
   products: Product[];
+  barcodeRules: BarcodeRule[]; // étiquettes de la balance (§3, contrat 0.7)
+  onPick: (product: Product) => void; // article trouvé sans poids : au poids, le poids reste à saisir
   lastSale: LastSale | null;
   overLimit: DiscountExcess | null; // remises d'un caissier au-delà du plafond (§11) ; null : pas de plafond pour ce rôle
   onCheckout: (payments: Payment[], amountReceived: number) => void;
   onHold: (note: string) => void;
 }
 
-const formatQuantity = (q: number) => q.toLocaleString('fr-FR', { maximumFractionDigits: 3 });
-
-export function Cart({ cart, dispatch, products, lastSale, overLimit, onCheckout, onHold }: Props) {
+export function Cart({ cart, dispatch, products, barcodeRules, onPick, lastSale, overLimit, onCheckout, onHold }: Props) {
   const scanRef = useRef<HTMLInputElement>(null);
-  const [notFound, setNotFound] = useState<string | null>(null);
+  const [scanError, setScanError] = useState<string | null>(null);
   const [paying, setPaying] = useState<'cash' | 'multiple' | 'hold' | null>(null);
   const totals = saleTotals(cart.lines, cart.otherCharges, cart.globalDiscount);
-  const quantity = cart.lines.reduce((n, l) => n + l.quantity, 0);
+  const articles = articleCount(cart.lines);
   const payable = cart.lines.length > 0 && totals.ttc > 0;
   const setQuantity = (productId: string, q: number) => dispatch({ type: 'setQuantity', productId, quantity: q });
   // Après le choix du client ou la fermeture d'une fenêtre, la douchette doit retrouver son champ.
@@ -58,13 +61,11 @@ export function Cart({ cart, dispatch, products, lastSale, overLimit, onCheckout
   // Une douchette tape le code puis « Entrée » : on traite donc la saisie comme un formulaire.
   function scan(e: FormEvent) {
     e.preventDefault();
-    const typed = scanRef.current?.value.trim() ?? '';
-    const value = typed.toLowerCase();
-    if (!value) return;
-    const product = products.find((p) => p.barcode === value || p.code.toLowerCase() === value)
-      ?? products.find((p) => p.name.toLowerCase().includes(value));
-    if (product) dispatch({ type: 'add', product });
-    setNotFound(product ? null : typed);
+    const found = lookupScan(scanRef.current?.value ?? '', products, barcodeRules);
+    if (!found) return;
+    if (found.kind === 'weighed') dispatch({ type: 'add', product: found.product, quantity: found.quantity });
+    else if (found.kind === 'product') onPick(found.product);
+    setScanError(found.kind === 'error' ? found.message : null);
     if (scanRef.current) scanRef.current.value = '';
   }
 
@@ -74,11 +75,11 @@ export function Cart({ cart, dispatch, products, lastSale, overLimit, onCheckout
         <form className="scan" onSubmit={scan}>
           <div className="field">
             <Icon name="barcode" />
-            <input id="scan" ref={scanRef} autoFocus autoComplete="off" onInput={() => setNotFound(null)}
+            <input id="scan" ref={scanRef} autoFocus autoComplete="off" onInput={() => setScanError(null)}
               placeholder="Scanner un code-barres, ou taper un code ou un nom" aria-label="Scanner ou rechercher un article" />
             <kbd>Ctrl+Maj+S</kbd>
           </div>
-          {notFound && <p className="scan-error" role="alert">Aucun article pour « {notFound} »</p>}
+          {scanError && <p className="scan-error" role="alert">{scanError}</p>}
         </form>
         <CustomerPicker customer={cart.customer} onDone={focusScan}
           onChange={(customer) => dispatch({ type: 'setCustomer', customer })} />
@@ -99,31 +100,26 @@ export function Cart({ cart, dispatch, products, lastSale, overLimit, onCheckout
               <tr><th>Article</th><th className="num col-price">Prix</th><th>Quantité</th><th>Remise</th><th className="num">Total</th><th /></tr>
             </thead>
             <tbody>
-              {cart.lines.map((l) => (
+              {cart.lines.map((l) => {
+                const unit = lineUnit(l);
+                return (
                 <tr key={l.product_id}>
                   <td>
                     <div className="item-name">{l.name}</div>
                     <div className="item-meta">
                       {/* Sur écran étroit, le prix unitaire passe sous le nom au lieu d'avoir sa colonne. */}
-                      <span className="meta-price">{formatMad(l.unit_price_ttc)} · </span>
+                      <span className="meta-price">{unitPrice(l.unit_price_ttc, unit)} · </span>
                       <span className={l.quantity > l.stock ? 'warn' : ''}>
-                        {l.quantity > l.stock ? `Stock insuffisant : ${l.stock}` : `Stock : ${l.stock}`}
+                        {l.quantity > l.stock ? 'Stock insuffisant' : 'Stock'} : {formatQuantity(l.stock, unit)}
                       </span>
                       {overLimit?.lines.includes(l.product_id) && (
                         <span className="warn approval-needed"> · Remise au-delà du plafond : PIN responsable au paiement</span>
                       )}
                     </div>
                   </td>
-                  <td className="num col-price">{formatMad(l.unit_price_ttc)}</td>
+                  <td className="num col-price">{unitPrice(l.unit_price_ttc, unit)}</td>
                   <td>
-                    <div className="stepper">
-                      <button type="button" aria-label="Enlever un" disabled={l.quantity <= 1}
-                        onClick={() => setQuantity(l.product_id, l.quantity - 1)}><Icon name="minus" size={16} /></button>
-                      <input type="number" min={0.001} step={1} value={l.quantity} aria-label="Quantité"
-                        onChange={(e) => setQuantity(l.product_id, Number(e.target.value))} />
-                      <button type="button" aria-label="Ajouter un"
-                        onClick={() => setQuantity(l.product_id, l.quantity + 1)}><Icon name="plus" size={16} /></button>
-                    </div>
+                    <QuantityField quantity={l.quantity} unit={unit} onChange={(q) => setQuantity(l.product_id, q)} />
                   </td>
                   <td>
                     <span className="money">
@@ -138,7 +134,8 @@ export function Cart({ cart, dispatch, products, lastSale, overLimit, onCheckout
                       onClick={() => dispatch({ type: 'remove', productId: l.product_id })}><Icon name="trash" size={18} /></button>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -170,7 +167,7 @@ export function Cart({ cart, dispatch, products, lastSale, overLimit, onCheckout
         <div className="total">
           <span className="label">Total à payer</span>
           <strong className="amount">{formatMad(totals.ttc)}</strong>
-          <span className="details">Qté {formatQuantity(quantity)} · HT {formatMad(totals.ht)} · TVA {formatMad(totals.tva)}</span>
+          <span className="details">{articles} article{articles > 1 ? 's' : ''} · HT {formatMad(totals.ht)} · TVA {formatMad(totals.tva)}</span>
         </div>
       </div>
 
@@ -200,7 +197,7 @@ export function Cart({ cart, dispatch, products, lastSale, overLimit, onCheckout
           onClose={() => { setPaying(null); focusScan(); }} />
       )}
       {paying === 'hold' && (
-        <HoldModal total={totals.ttc} articles={quantity}
+        <HoldModal total={totals.ttc} articles={articles}
           onHold={(note) => { setPaying(null); onHold(note); focusScan(); }}
           onClose={() => { setPaying(null); focusScan(); }} />
       )}

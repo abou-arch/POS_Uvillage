@@ -89,6 +89,8 @@ export const api = {
     request<{ id: string; status: string; session_closed?: boolean }>('/refunds', { method: 'POST', body: JSON.stringify(refund) }),
   // Responsables qui autorisent les opérations d'un caissier, avec l'empreinte de leur PIN (§11) : vérifiés par la caisse.
   approvers: (storeId: string) => request<{ approvers: unknown[] }>(`/stores/${encodeURIComponent(storeId)}/approvers`),
+  // Règles des codes-barres de la balance (§3, contrat 0.7) : contrôlées par la caisse avant usage.
+  barcodeRules: (storeId: string) => request<{ rules: unknown[] }>(`/stores/${encodeURIComponent(storeId)}/barcode-rules`),
   // Sessions de caisse (§9)
   currentCashSession: (registerId: string) =>
     request<{ session: CashSession | null }>(`/cash-sessions/current?register_id=${encodeURIComponent(registerId)}`),

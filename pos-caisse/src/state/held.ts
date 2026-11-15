@@ -23,6 +23,7 @@ const isCustomer = (v: unknown): v is Customer =>
   isRecord(v) && isId(v.id) && typeof v.name === 'string' && isNullableText(v.phone) && isNullableText(v.matricule);
 const isLine = (v: unknown): v is CartLine =>
   isRecord(v) && isId(v.product_id) && typeof v.name === 'string' && isQuantity(v.quantity)
+  && (v.unit === undefined || v.unit === 'unit' || v.unit === 'kg') // absente des paniers mis de côté avant le contrat 0.7
   && isCents(v.unit_price_ttc) && isCents(v.discount) && isRate(v.tva_rate)
   && typeof v.stock === 'number' && Number.isFinite(v.stock);
 const isCart = (v: unknown): v is CartState =>
@@ -80,7 +81,7 @@ export function refreshFromCatalog(cart: CartState, products: Product[]):
     if (p.price_ttc !== l.unit_price_ttc) {
       changes.push({ product_id: l.product_id, name: p.name, before: l.unit_price_ttc, after: p.price_ttc });
     }
-    return { ...l, name: p.name, unit_price_ttc: p.price_ttc, tva_rate: p.tva_rate, stock: p.stock };
+    return { ...l, name: p.name, unit: p.unit === 'kg' ? 'kg' as const : 'unit' as const, unit_price_ttc: p.price_ttc, tva_rate: p.tva_rate, stock: p.stock };
   });
   return { cart: { ...cart, lines }, changes, missing, checked: true };
 }

@@ -14,7 +14,7 @@ function memoryStorage(initial: Record<string, string> = {}) {
 
 const product = (id: string, price_ttc: number, extra: Partial<Product> = {}): Product => ({
   id, code: id, barcode: null, name: id.toUpperCase(), name_ar: null, category_id: null, brand_id: null,
-  price_ttc, tva_rate: 20, image_url: null, stock: 50, stock_alert: 5, expiry_date: null, active: true, updated_at: '',
+  price_ttc, tva_rate: 20, unit: 'unit', image_url: null, stock: 50, stock_alert: 5, expiry_date: null, active: true, updated_at: '',
   ...extra,
 });
 const run = (...actions: CartAction[]): CartState => actions.reduce(cartReducer, emptyCart);

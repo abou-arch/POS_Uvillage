@@ -3,7 +3,7 @@
 import { pbkdf2Sync, randomBytes } from 'node:crypto';
 import express from 'express';
 import cors from 'cors';
-import { users, stores, categories, brands, products, customers, sales, cashSessions, cashMovements, refunds } from './data.js';
+import { users, stores, categories, brands, products, customers, sales, cashSessions, cashMovements, refunds, barcodeRules } from './data.js';
 import { loadState, saveState } from './state.js';
 import { paidByLine, refundLine, saleTotals } from '../src/lib/totals.js';
 
@@ -92,6 +92,12 @@ app.get('/api/stores/:id/approvers', (req, res) => {
   res.json({ approvers });
 });
 
+// Règles des codes-barres de la balance du magasin (§3, contrat 0.7).
+app.get('/api/stores/:id/barcode-rules', (req, res) => {
+  if (!req.user.store_ids.includes(req.params.id)) return err(res, 403, 'FORBIDDEN', 'Magasin non autorisé');
+  res.json({ rules: barcodeRules[req.params.id] ?? [] });
+});
+
 app.get('/api/customers', (req, res) => {
   const q = String(req.query.search ?? '').toLowerCase();
   res.json(customers.filter((c) => !q || c.name.toLowerCase().includes(q) || c.phone?.includes(q) || c.matricule?.includes(q)));
@@ -118,10 +124,17 @@ function sessionOf(doc) {
   return { session };
 }
 
+// §5 et §10 (contrat 0.7) : quantité entière sur une ligne « unit », 3 décimales au plus sur une ligne « kg ».
+// Une ligne sans unit vient d'une caisse d'avant 0.7 : acceptée telle quelle.
+const fitsUnit = (unit, q) => unit === undefined
+  || (unit === 'unit' && Number.isInteger(q)) || (unit === 'kg' && Math.abs(q * 1000 - Math.round(q * 1000)) < 1e-6);
+
 function createSale(sale) {
   const known = sales.get(sale.id);
   if (known) return { status: 200, body: { id: sale.id, status: 'duplicate', stock_warning: false, session_closed: known.session_closed ?? false } };
   if (!isApproval(sale.approved_by)) return { status: 400, body: error('INVALID_DATA', 'approved_by invalide') };
+  const badLine = (sale.lines ?? []).findIndex((l) => !l || !(typeof l.quantity === 'number' && l.quantity > 0) || !fitsUnit(l.unit, l.quantity));
+  if (badLine >= 0) return { status: 400, body: error('INVALID_DATA', 'Quantité ou unité invalide', { line_index: badLine }) };
   // §5 : une session déjà clôturée n'empêche pas d'enregistrer la vente : elle a eu lieu.
   const { session, ...refused } = sessionOf(sale);
   if (!session) return refused;
@@ -141,7 +154,7 @@ function createSale(sale) {
   for (const line of sale.lines) {
     const product = products.find((p) => p.id === line.product_id);
     if (!product) continue;
-    product.stock_by_store[sale.store_id] = (product.stock_by_store[sale.store_id] ?? 0) - line.quantity;
+    product.stock_by_store[sale.store_id] = round3((product.stock_by_store[sale.store_id] ?? 0) - line.quantity); // kg : 3 décimales
     product.updated_at = new Date().toISOString();
     if (product.stock_by_store[sale.store_id] < 0) stock_warning = true;
   }
@@ -175,7 +188,7 @@ app.post('/api/sales/:id/cancel', (req, res) => {
   }
   for (const line of sale.lines) {
     const product = products.find((p) => p.id === line.product_id);
-    if (product) product.stock_by_store[sale.store_id] += line.quantity;
+    if (product) product.stock_by_store[sale.store_id] = round3(product.stock_by_store[sale.store_id] + line.quantity);
   }
   sale.status = 'cancelled';
   save();
@@ -213,7 +226,7 @@ function validRefund(b) {
     && (b.customer_id === null || isId(b.customer_id)) && isDate(b.created_at)
     && REASONS.includes(b.reason) && isNote(b.reason_text) && (b.reason !== 'other' || isText(b.reason_text))
     && Array.isArray(b.lines) && b.lines.length > 0
-    && b.lines.every((l) => l && Number.isInteger(l.line_index) && l.line_index >= 0 && isQuantity(l.quantity)
+    && b.lines.every((l) => l && Number.isInteger(l.line_index) && l.line_index >= 0 && isQuantity(l.quantity) && fitsUnit(l.unit, l.quantity)
       && ['total_ht', 'total_tva', 'total_ttc'].every((k) => isInt(l[k], 0)))
     && new Set(b.lines.map((l) => l.line_index)).size === b.lines.length
     && b.totals && ['ht', 'tva', 'ttc'].every((k) => isInt(b.totals[k], 0))
@@ -239,7 +252,7 @@ app.post('/api/refunds', (req, res) => {
   const paid = paidByLine(sale.lines, sale.other_charges, sale.global_discount);
   for (const l of b.lines) {
     const original = sale.lines[l.line_index];
-    if (!original || (original.id ?? null) !== (l.original_line_id ?? null)) {
+    if (!original || (original.id ?? null) !== (l.original_line_id ?? null) || (original.unit ?? null) !== (l.unit ?? null)) {
       return err(res, 422, 'LINE_MISMATCH', 'Ligne de vente introuvable', { line_index: l.line_index });
     }
     const before = previous.flatMap((r) => r.lines).filter((x) => x.line_index === l.line_index);

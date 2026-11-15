@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { formatMad, saleTotals } from '../lib/totals.js';
 import type { HeldSale } from '../state/held';
+import { articleCount } from '../state/cart';
 import { Modal } from './Modal';
 import { Icon } from './ui';
 
@@ -34,7 +35,7 @@ export function HeldListModal({ list, cartEmpty, onResume, onDelete, onClose }: 
         ) : (
           <ul>
             {list.map((h, i) => {
-              const articles = h.cart.lines.reduce((n, l) => n + l.quantity, 0);
+              const articles = articleCount(h.cart.lines); // une ligne au poids compte pour un article
               const total = saleTotals(h.cart.lines, h.cart.otherCharges, h.cart.globalDiscount).ttc;
               const asking = confirm?.id === h.id ? confirm.kind : null;
               return (

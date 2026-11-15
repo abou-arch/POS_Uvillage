@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { Customer, Product } from '../types';
-import { canSendSms, cartReducer, emptyCart, type CartAction, type CartState } from './cart';
+import { articleCount, canSendSms, cartReducer, emptyCart, quantityError, readQuantity, type CartAction, type CartState } from './cart';
 
 const product = (id: string, price_ttc: number): Product => ({
   id, code: id, barcode: null, name: id.toUpperCase(), name_ar: null, category_id: null, brand_id: null,
-  price_ttc, tva_rate: 20, image_url: null, stock: 50, stock_alert: 5, expiry_date: null, active: true, updated_at: '',
+  price_ttc, tva_rate: 20, unit: 'unit', image_url: null, stock: 50, stock_alert: 5, expiry_date: null, active: true, updated_at: '',
 });
 const run = (...actions: CartAction[]): CartState => actions.reduce(cartReducer, emptyCart);
 
@@ -60,5 +60,49 @@ describe('client et SMS', () => {
     const sms = cartReducer(cartReducer(emptyCart, { type: 'setCustomer', customer: ahmed }), { type: 'toggleSms' });
     const cleared = cartReducer(sms, { type: 'setCustomer', customer: null });
     expect(cleared).toMatchObject({ customer: null, sendSms: false });
+  });
+});
+
+describe('quantités à la pièce et au poids (§1, contrat 0.7)', () => {
+  const olives = { ...product('p5', 2500), unit: 'kg' as const }; // 25,00 DH le kg
+
+  it('critère 6e : un article à la pièce refuse 1,5 ; le panier ne change pas', () => {
+    const cart = run({ type: 'add', product: product('p1', 1000) }, { type: 'setQuantity', productId: 'p1', quantity: 1.5 });
+    expect(cart.lines[0].quantity).toBe(1);
+    expect(quantityError('unit', 1.5)).toBe('Article vendu à la pièce : quantité entière (pas de 1,5).');
+    expect(readQuantity('1,5', 'unit')).toEqual({ quantity: null, error: 'Article vendu à la pièce : quantité entière (pas de 1,5).' });
+    expect(readQuantity('3', 'unit')).toEqual({ quantity: 3, error: null });
+    expect(run({ type: 'add', product: product('p1', 1000), quantity: 0.5 }).lines).toEqual([]);
+  });
+
+  it('article au poids : saisi en kg, 3 décimales au plus', () => {
+    const cart = run({ type: 'add', product: olives, quantity: 0.75 });
+    expect(cart.lines[0]).toMatchObject({ unit: 'kg', quantity: 0.75, unit_price_ttc: 2500 });
+    expect(readQuantity('0,750', 'kg')).toEqual({ quantity: 0.75, error: null });
+    expect(readQuantity('0.7505', 'kg').error).toBe('Poids : 3 décimales au plus (au gramme près).');
+    expect(readQuantity('abc', 'kg').error).toBe('Poids invalide : en kg, par exemple 0,750.');
+    expect(readQuantity('0', 'kg').error).toBe('Poids invalide.');
+    expect(cartReducer(cart, { type: 'setQuantity', productId: 'p5', quantity: 1.2345 }).lines[0].quantity).toBe(0.75);
+    expect(cartReducer(cart, { type: 'setQuantity', productId: 'p5', quantity: 1.25 }).lines[0].quantity).toBe(1.25);
+  });
+
+  it('deux pesées du même article s’additionnent au gramme près', () => {
+    const cart = run({ type: 'add', product: olives, quantity: 0.375 }, { type: 'add', product: olives, quantity: 0.5 });
+    expect(cart.lines).toHaveLength(1);
+    expect(cart.lines[0].quantity).toBe(0.875);
+  });
+
+  it('quantités aberrantes refusées', () => {
+    expect(quantityError('unit', 0)).toBe('Quantité invalide.');
+    expect(quantityError('unit', -2)).toBe('Quantité invalide.');
+    expect(quantityError('unit', Number.NaN)).toBe('Quantité invalide.');
+    expect(quantityError('unit', 10_000)).toMatch(/au plus/);
+    expect(quantityError('kg', 0.001)).toBeNull();
+  });
+
+  it('nombre d’articles : les pièces, plus un par article pesé', () => {
+    const cart = run({ type: 'add', product: product('p1', 1000) }, { type: 'add', product: product('p1', 1000) },
+      { type: 'add', product: olives, quantity: 0.375 });
+    expect(articleCount(cart.lines)).toBe(3);
   });
 });

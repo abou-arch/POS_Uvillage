@@ -3,6 +3,7 @@
 // Elle tourne tant qu'une caisse est choisie, session ouverte ou non : la clôture part aussi depuis l'écran d'ouverture.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { syncApprovers } from '../db/approvers';
+import { syncBarcodeRules } from '../db/barcodeRules';
 import { syncCatalog } from '../db/catalog';
 import { db } from '../db/db';
 import { ensureMigrated } from '../db/migrate';
@@ -47,6 +48,8 @@ export function useSync(storeId: string) {
         await syncCatalog(storeId);
         // Responsables et empreinte de leur PIN (§11) : en cas d'échec, la liste gardée sur la caisse reste valable.
         await syncApprovers(storeId).catch(() => {});
+        // Règles des codes-barres de la balance (§3) : en cas d'échec, les règles gardées restent valables.
+        await syncBarcodeRules(storeId).catch(() => {});
       } catch {
         setConnection('offline'); // API injoignable pour le catalogue, ou base locale indisponible
         return 'offline';

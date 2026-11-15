@@ -32,6 +32,15 @@ export interface Session extends Auth {
   registerId: string;
 }
 
+/** Unité de vente (§3) : à la pièce (quantité entière) ou au poids (quantité en kg, 3 décimales, prix d'un kg). */
+export type Unit = 'unit' | 'kg';
+
+/**
+ * Règle d'un code-barres de balance (GET /api/stores/{id}/barcode-rules, §3) : EAN-13 = préfixe, code article,
+ * valeur (integer_digits + decimal_digits chiffres), chiffre de contrôle. weight : poids en kg ; price : prix TTC en DH.
+ */
+export interface BarcodeRule { prefix: string; type: 'weight' | 'price'; integer_digits: number; decimal_digits: number }
+
 export interface Category { id: string; name: string; name_ar: string | null }
 export interface Brand { id: string; name: string }
 
@@ -43,8 +52,9 @@ export interface Product {
   name_ar: string | null;
   category_id: string | null;
   brand_id: string | null;
-  price_ttc: number;
+  price_ttc: number; // prix d'un kg pour un article au poids
   tva_rate: number;
+  unit: Unit;
   image_url: string | null;
   stock: number;
   stock_alert: number;
@@ -59,7 +69,8 @@ export interface Customer { id: string; name: string; phone: string | null; matr
 export interface CartLine {
   product_id: string;
   name: string;
-  quantity: number;
+  unit: Unit;
+  quantity: number; // en kg pour un article au poids
   unit_price_ttc: number;
   discount: number;
   tva_rate: number;
@@ -69,9 +80,11 @@ export interface CartLine {
 export type PaymentMethod = 'cash' | 'card' | 'mobile' | 'credit';
 export interface Payment { method: PaymentMethod; amount: number }
 
-export interface SaleLine extends Omit<CartLine, 'stock'> {
+export interface SaleLine extends Omit<CartLine, 'stock' | 'unit'> {
   /** UUID v4 de la ligne (contrat 0.5). Absent des ventes plus anciennes : leurs lignes se repèrent par leur position. */
   id?: string;
+  /** Unité de l'article au moment de la vente (contrat 0.7). Absente des ventes plus anciennes. */
+  unit?: Unit;
   total_ht: number;
   total_tva: number;
   total_ttc: number;
@@ -167,6 +180,7 @@ export interface RefundLine {
   line_index: number;
   product_id: string;
   name: string;
+  unit?: Unit; // celle de la ligne d'origine ; absente si elle n'en a pas (vente d'avant le contrat 0.7)
   quantity: number;
   unit_price_ttc: number;
   tva_rate: number;
