@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { placeOf } from '../state/session';
 import { describeItem } from '../sync/sync';
 import type { SyncState } from '../sync/useSync';
@@ -20,12 +20,17 @@ export function TopBar({ session, sync, children, onLogout }: {
   return (
     <header className="topbar">
       <span className="brand"><span className="logo"><Icon name="register" size={18} /></span>Caisse</span>
-      <span className="where"><Icon name="store" size={16} />{storeName}<span className="dot">·</span>{registerName}</span>
+      <span className="where" title={`${storeName} · ${registerName}`}>
+        <Icon name="store" size={16} /><span className="where-text">{storeName}<span className="dot"> · </span>{registerName}</span>
+      </span>
       <SyncStatus connection={sync.connection} pending={sync.outbox.length} rejected={rejected} onSync={() => sync.sync(true)} />
       <span className="spacer" />
+      <Clock />
       {children}
       <span className="who" title={session.user.name}><Avatar name={session.user.name} /><span className="label">{session.user.name}</span></span>
-      <button className="btn ghost" onClick={onLogout}><Icon name="logout" size={18} />Déconnexion</button>
+      <button className="btn ghost" onClick={onLogout} title="Déconnexion">
+        <Icon name="logout" size={18} /><span className="label optional">Déconnexion</span>
+      </button>
     </header>
   );
 }
@@ -54,5 +59,24 @@ export function SyncBanners({ sync, unreadable }: { sync: SyncState; unreadable:
         </p>
       )}
     </>
+  );
+}
+
+const pad = (n: number) => String(n).padStart(2, '0');
+
+// Heure (les deux-points battent la seconde) et date du jour, relues toutes les 5 s.
+function Clock() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 5000);
+    return () => clearInterval(id);
+  }, []);
+  const date = now.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
+  return (
+    <time className="clock" dateTime={now.toISOString()} title={now.toLocaleDateString('fr-FR', { dateStyle: 'full' })}>
+      <Icon name="clock" size={16} />
+      <strong>{pad(now.getHours())}<span className="colon">:</span>{pad(now.getMinutes())}</strong>
+      <span className="date">{date}</span>
+    </time>
   );
 }

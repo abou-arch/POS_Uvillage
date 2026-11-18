@@ -1,6 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type CSSProperties } from 'react';
+import { categoryHue, categoryPictogram } from '../lib/categoryLook';
 import { formatQuantity, unitPrice } from '../lib/units';
 import type { Brand, Category, Product } from '../types';
+import { flyToCart } from './fx';
 import { Icon } from './ui';
 
 interface Props {
@@ -10,10 +12,17 @@ interface Props {
   onAdd: (p: Product) => void;
 }
 
+// Une teinte par catégorie (variable CSS --hue) : les familles d'articles se repèrent d'un coup d'œil.
+const hueStyle = (categoryId: string | null) => {
+  const hue = categoryHue(categoryId);
+  return hue === null ? undefined : ({ '--hue': hue } as CSSProperties);
+};
+
 export function ProductGrid({ products, categories, brands, onAdd }: Props) {
   const [categoryId, setCategoryId] = useState('');
   const [brandId, setBrandId] = useState('');
   const [query, setQuery] = useState('');
+  const categoryById = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories]);
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -38,20 +47,33 @@ export function ProductGrid({ products, categories, brands, onAdd }: Props) {
         </select>
       </div>
       <div className="chips" role="group" aria-label="Catégories">
-        {[{ id: '', name: 'Tout' }, ...categories].map((c) => (
-          <button key={c.id} type="button" className={`chip ${categoryId === c.id ? 'active' : ''}`}
-            aria-pressed={categoryId === c.id} onClick={() => setCategoryId(c.id)}>{c.name}</button>
+        <button type="button" className={`chip ${categoryId === '' ? 'active' : ''}`}
+          aria-pressed={categoryId === ''} onClick={() => setCategoryId('')}><Icon name="grid" size={15} />Tout</button>
+        {categories.map((c) => (
+          <button key={c.id} type="button" className={`chip ${categoryId === c.id ? 'active' : ''}`} style={hueStyle(c.id)}
+            aria-pressed={categoryId === c.id} onClick={() => setCategoryId(c.id)}>
+            <Icon name={categoryPictogram(c.name)} size={15} />{c.name}
+          </button>
         ))}
       </div>
-      <div className="grid">
+      {/* La clé change avec le filtre : les vignettes réapparaissent en cascade à chaque catégorie. */}
+      <div className="grid" key={`${categoryId}|${brandId}`}>
         {visible.map((p) => {
           const level = p.stock <= 0 ? 'out' : p.stock <= p.stock_alert ? 'low' : '';
           const stock = formatQuantity(p.stock, p.unit); // au poids : en kg
+          const category = p.category_id ? categoryById.get(p.category_id) : undefined;
           return (
-            <button key={p.id} type="button" className={`tile ${level}`} onClick={() => onAdd(p)} title={p.code}>
-              <span className="thumb" style={thumbColors(p.category_id)}>
-                {p.image_url ? <img src={p.image_url} alt="" /> : p.name.charAt(0)}
+            <button key={p.id} type="button" className={`tile ${level}`} title={p.code}
+              onClick={(e) => {
+                // Au poids, le poids reste à saisir : l'article n'entre dans le panier qu'après.
+                if (p.unit !== 'kg') flyToCart(e.currentTarget.querySelector('.thumb'));
+                onAdd(p);
+              }}>
+              <span className={`thumb ${p.category_id ? '' : 'plain'}`} style={hueStyle(p.category_id)}>
+                {p.image_url ? <img src={p.image_url} alt="" /> : <Icon name={categoryPictogram(category?.name)} size={30} />}
+                {p.unit === 'kg' && <span className="thumb-tag">kg</span>}
               </span>
+              <span className="add-hint" aria-hidden="true"><Icon name="plus" size={16} /></span>
               <span className="name">{p.name}</span>
               {p.name_ar && <span className="name-ar" dir="rtl" lang="ar">{p.name_ar}</span>}
               <span className="tile-foot">
@@ -67,12 +89,4 @@ export function ProductGrid({ products, categories, brands, onAdd }: Props) {
       </div>
     </section>
   );
-}
-
-// Une teinte par catégorie : les familles d'articles se repèrent d'un coup d'œil.
-function thumbColors(categoryId: string | null) {
-  if (!categoryId) return { background: '#eef2f6', color: '#64748b' };
-  const n = [...categoryId].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 0);
-  const hue = Math.round((n * 137.508) % 360);
-  return { background: `hsl(${hue} 70% 93%)`, color: `hsl(${hue} 45% 32%)` };
 }

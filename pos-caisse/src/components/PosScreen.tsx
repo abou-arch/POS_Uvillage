@@ -363,11 +363,11 @@ export function PosScreen({ session, cashSession, sync, unreadableSessions, onCl
           <Icon name="cash" size={18} /><span className="label">Session</span>
         </button>
         <button className="held-button" onClick={() => setShowHeld(true)} aria-label={`Liste d’attente : ${held.list.length}`}>
-          <Icon name="pause" size={18} /><span className="label">Liste d’attente</span><span className="count">{held.list.length}</span>
+          <Icon name="pause" size={18} /><span className="label">Liste d’attente</span><span className="count" key={held.list.length}>{held.list.length}</span>
         </button>
         <button className="held-button" disabled={!receipt} onClick={() => receipt && printSale(receipt, true)}
           aria-label="Réimprimer le dernier ticket" title={receipt ? `Réimprimer le ticket ${receipt.sale.number}` : 'Aucun ticket à réimprimer'}>
-          <Icon name="printer" size={18} /><span className="label">Réimprimer</span>
+          <Icon name="printer" size={18} /><span className="label optional">Réimprimer</span>
         </button>
       </TopBar>
       {error && (
@@ -401,7 +401,7 @@ export function PosScreen({ session, cashSession, sync, unreadableSessions, onCl
       )}
       <SyncBanners sync={sync} unreadable={unreadable} />
       <main>
-        <Cart cart={cart} dispatch={cartDispatch} products={products.value} barcodeRules={barcodeRules} onPick={pick}
+        <Cart cart={cart} dispatch={cartDispatch} products={products.value} categories={categories} barcodeRules={barcodeRules} onPick={pick}
           lastSale={lastSale && lastSaleView(lastSale)}
           overLimit={overLimit} onCheckout={checkout} onHold={hold} />
         <ProductGrid products={products.value} categories={categories} brands={brands}
