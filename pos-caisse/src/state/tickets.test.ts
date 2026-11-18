@@ -58,7 +58,9 @@ describe('tickets de la session', () => {
   it('compteur et heure du ticket', () => {
     expect(ticketCounter('ST2-REG3-000012')).toBe(12);
     expect(ticketCounter('vente')).toBeNull();
-    expect(ticketTime('2026-11-14T18:58:08Z', 'Africa/Casablanca')).toBe('19:58');
+    // Fuseau à décalage fixe (+9 h, sans heure d'été) : le résultat pour Africa/Casablanca dépend de la version des
+    // données de fuseaux du moteur JS (19:58 avec Node 24.13, 18:58 avec Node 24.22) et ferait échouer le test.
+    expect(ticketTime('2026-11-14T18:58:08Z', 'Asia/Tokyo')).toBe('03:58');
     expect(ticketTime('2026-11-14T18:58:08Z', 'UTC')).toBe('18:58');
   });
 });
