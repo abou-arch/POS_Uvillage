@@ -4,11 +4,35 @@ import { isAuth } from '../state/session';
 import type { Auth } from '../types';
 import { Icon } from './ui';
 
+const DEMO = import.meta.env.MODE === 'demo';
+
+/** Démo (npm run build:demo) : comptes de test de la fausse API, et remise à zéro des données du navigateur. */
+function DemoAccounts() {
+  async function reset() {
+    if (!confirm('Effacer les ventes, sessions et réglages de la démo dans ce navigateur ?')) return;
+    (await import('../demo/install')).resetDemo();
+  }
+  return (
+    <div className="demo-note">
+      <p><strong>Démo</strong> : aucune donnée réelle, tout reste dans ce navigateur.</p>
+      <table>
+        <tbody>
+          <tr><td>Caissier</td><td><code>caissier</code> / <code>caissier</code></td><td /></tr>
+          <tr><td>Responsable</td><td><code>responsable</code> / <code>responsable</code></td><td>PIN <code>246810</code></td></tr>
+          <tr><td>Admin</td><td><code>admin</code> / <code>admin</code></td><td>PIN <code>135790</code></td></tr>
+        </tbody>
+      </table>
+      <button type="button" className="btn secondary" onClick={reset}>Réinitialiser la démo</button>
+    </div>
+  );
+}
+
 export function Login({ onLogin, notice }: { onLogin: (auth: Auth) => void; notice?: string | null }) {
-  // Compte de test de la fausse API prérempli en développement seulement : la version de production
+  // Compte de test de la fausse API prérempli en développement et dans la démo seulement : la version de production
   // (npm run build) n'embarque aucun identifiant.
-  const [username, setUsername] = useState(import.meta.env.DEV ? 'caissier' : '');
-  const [password, setPassword] = useState(import.meta.env.DEV ? 'caissier' : '');
+  const prefill = import.meta.env.DEV || DEMO ? 'caissier' : '';
+  const [username, setUsername] = useState(prefill);
+  const [password, setPassword] = useState(prefill);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -49,6 +73,7 @@ export function Login({ onLogin, notice }: { onLogin: (auth: Auth) => void; noti
         </label>
         {error && <p className="alert" role="alert"><Icon name="alert" size={18} />{error}</p>}
         <button className="btn primary" disabled={loading}>{loading ? 'Connexion…' : 'Se connecter'}</button>
+        {DEMO && <DemoAccounts />}
       </form>
     </div>
   );

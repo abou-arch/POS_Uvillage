@@ -1,5 +1,6 @@
 import react from '@vitejs/plugin-react'
-import { defineConfig, loadEnv, type Plugin } from 'vite'
+import { fileURLToPath } from 'node:url'
+import { defineConfig, loadEnv, normalizePath, type Plugin } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
 // Politique de sécurité du contenu (CSP), ajoutée au build seulement : le serveur de dev injecte des scripts en ligne
@@ -34,12 +35,34 @@ function contentSecurityPolicy(apiUrl: string): Plugin {
   }
 }
 
+// Démo sans serveur (npm run build:demo, publiée sur GitHub Pages) : la fausse API (mock-api/server.js, inchangée)
+// est embarquée dans la page. Ce que server.js importe de Node est remplacé par les fichiers de src/demo/.
+function demoApi(): Plugin {
+  // normalizePath : sous Windows, le même fichier doit avoir le même identifiant que pour les imports de src/demo.
+  const demo = (file: string) => normalizePath(fileURLToPath(new URL(`./src/demo/${file}`, import.meta.url)))
+  const fromMockApi = (importer?: string) => !!importer && /[\\/]mock-api[\\/][^\\/]+\.js$/.test(importer)
+  const shims: Record<string, string> = {
+    'node:crypto': demo('crypto.ts'),
+    express: demo('express.ts'),
+    cors: demo('stubs.ts'),
+    './state.js': demo('state.ts'),
+    './breakline.js': demo('stubs.ts'),
+  }
+  return {
+    name: 'caisse-demo-api',
+    enforce: 'pre',
+    resolveId: (source, importer) => (fromMockApi(importer) && shims[source]) || null,
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), 'VITE_')
   return {
+    base: env.VITE_BASE ?? '/', // la démo est servie sous /POS_Uvillage/ (voir .env.demo)
     plugins: [
       react(),
+      mode === 'demo' && demoApi(),
       contentSecurityPolicy(env.VITE_API_URL ?? 'http://localhost:4000/api'), // même défaut que src/api/client.ts
       // PWA : la caisse s'installe et se recharge sans réseau. Le service worker (src/sw/sw.ts) met en cache l'application
       // (HTML, JS, CSS, icônes) ; les données (catalogue, ventes) sont dans IndexedDB, pas dans ce cache.
@@ -55,8 +78,8 @@ export default defineConfig(({ mode }) => {
           short_name: 'Caisse',
           description: 'Écran de caisse : vente, paiement et ticket, avec ou sans connexion.',
           lang: 'fr',
-          start_url: '/',
-          scope: '/',
+          start_url: './', // relatifs au manifeste : marche aussi sous un sous-dossier (démo)
+          scope: './',
           display: 'standalone',
           background_color: '#eef2f6',
           theme_color: '#1f6fb5',

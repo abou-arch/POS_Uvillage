@@ -62,6 +62,12 @@ input[type=number] { font-variant-numeric:tabular-nums; }
 .login { max-width:390px; }
 .login label { display:grid; gap:6px; font-size:13px; font-weight:600; }
 .login input { height:46px; }
+.demo-note { display:grid; gap:8px; padding:12px; border:1px dashed var(--blue-line); border-radius:10px; background:var(--blue-soft); font-size:13px; }
+.demo-note p { margin:0; }
+.demo-note table { border-collapse:collapse; }
+.demo-note td { padding:2px 8px 2px 0; white-space:nowrap; }
+.demo-note code { font-size:12px; }
+.demo-note .btn { justify-self:start; height:34px; font-size:13px; }
 .picker { max-width:470px; }
 .picker footer { display:flex; align-items:center; justify-content:space-between; padding-top:16px; border-top:1px solid var(--line); }
 .steps { display:flex; align-items:center; gap:10px; margin:0; padding:0; list-style:none; counter-reset:step; color:var(--muted); font-size:13px; font-weight:600; }
