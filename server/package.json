@@ -1,0 +1,21 @@
+{
+  "name": "pos-serveur",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Serveur du POS Uvillage : API de la caisse (contrat pos-caisse/docs/API_CONTRACT.md) et du back-office, base SQLite.",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env src/index.js",
+    "dev": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env --watch src/index.js",
+    "demo": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env src/index.js --demo",
+    "seed": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env src/index.js --seed-only",
+    "test": "node --disable-warning=ExperimentalWarning --test"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^5.2.1"
+  }
+}

@@ -1,9 +1,14 @@
 # Contrat d'API — Caisse (POS) ↔ Application web
 
-Version 0.7 — proposition à valider par l'équipe.
+Version 0.7 pour la caisse, 0.8 proposée pour le back-office (§12) — à valider par l’équipe.
 
 Changements par version :
 
+- **0.8 (proposition, rien ne change pour la caisse)** : le serveur de l'équipe (`server/`) et son back-office.
+  - §2 : `POST /api/auth/logout` révoque le token.
+  - §3 : `updated_at` des articles à la milliseconde (toujours ISO 8601).
+  - Nouveau §12 : routes du back-office (`/api/admin/*`), réservées aux rôles `admin` et `manager`.
+  - §8 : propositions pour les points 6 (matricule unique), 7 (clôture depuis le back-office) et 10 (PIN fixé au back-office).
 - **0.7** : articles au poids et codes-barres de balance.
   - §1 : quantité entière pour un article à la pièce, 3 décimales au plus pour un article au kg.
   - §3 : champ `unit` de l'article (`unit` ou `kg`). Pour un article au kg, `price_ttc` est le prix d'un kg, `stock` est en kg et `barcode` est son code de base.
@@ -659,3 +664,78 @@ Règles :
 - On choisit le responsable dans la liste, puis il tape son PIN. La caisse calcule l'empreinte et la compare à celle de la liste.
 - Après 3 PIN faux de suite sur la caisse, plus aucun essai n'est possible pendant 1 minute.
 - Ce contrôle est fait par la caisse seule. Quelqu'un qui accède aux données du poste peut lire les empreintes et chercher les PIN hors de la caisse. Ce risque est accepté et détaillé dans `docs/SECURITE.md`. Il est réduit par un PIN de 6 chiffres, le nombre d'itérations et le suivi des `approved_by` au back-office.
+
+## 12. Back-office (proposition 0.8)
+
+Routes utilisées par l'application web de gestion (`back-office/`), servies par `server/`. La caisse ne les appelle pas. Mêmes conventions qu'au §1 (centimes, dates ISO, erreurs). Toutes demandent un token d'un `admin` ou d'un `manager` (sinon `403 FORBIDDEN`) :
+
+- `admin` : tous les magasins ; seul à gérer les utilisateurs, les magasins, les caisses, la balance et les réglages ;
+- `manager` : ses magasins (ventes, stock, sessions, clients) et le catalogue, commun à tous les magasins.
+
+Un `store_id` hors des magasins de l'utilisateur → `403 FORBIDDEN`. Les listes datées prennent `from` (inclus) et `to` (exclu) en ISO 8601 : 30 derniers jours par défaut, 400 jours au plus (`400 INVALID_PERIOD`). Les listes longues prennent `limit` (500 au plus) et `offset`.
+
+### `POST /api/auth/logout`
+
+Révoque le token envoyé. Réponse `204`. Ouvert à tous les rôles.
+
+### Session et réglages
+
+| Route | Rôle |
+|---|---|
+| `GET /api/admin/me` | Utilisateur, ses magasins (adresse, ICE, caisses), réglages. |
+| `GET /api/admin/settings` · `PUT` (admin) | `tva_rates` (entiers 0-100, sans doublon) et `timezone` (par défaut `Africa/Casablanca`). Un taux encore porté par un article ne peut pas être retiré (`422 RATE_IN_USE`). |
+
+### Tableau de bord et rapports
+
+| Route | Rôle |
+|---|---|
+| `GET /api/admin/dashboard?store_id&from&to` | Rapport de la période, résumé de la période précédente de même durée, alertes de stock, sessions ouvertes avec leurs attendus, nombre d'opérations signalées (prix différent du catalogue, autorisation douteuse, vente reçue après la clôture, attendus différents à la clôture), clients qui doivent de l'argent. |
+| `GET /api/admin/reports?store_id&from&to` | Rapport : résumé (ventes, retours, net HT/TVA/TTC, panier moyen, annulations, remises, crédit accordé, marge si chaque article a un prix d'achat), par jour et par heure (fuseau des réglages), par moyen de paiement, article, catégorie, caissier, magasin, et par taux de TVA (retours déduits). |
+
+Les ventes annulées sont comptées à part. Le montant d'un article vendu est son payé (§7, remise globale répartie).
+
+### Catalogue et stock
+
+| Route | Rôle |
+|---|---|
+| `GET /api/admin/products?search&status&category_id` | Articles avec `cost_price` (prix d'achat, centimes, ou `null`) et `stock_by_store`. |
+| `GET /api/admin/products/{id}` | Article et ses 100 derniers mouvements de stock. |
+| `POST /api/admin/products` · `PUT /api/admin/products/{id}` | Code unique (`409 CODE_TAKEN`), code-barres unique (`409 BARCODE_TAKEN`), taux de TVA des réglages, unité `unit` ou `kg`. Un article n'est jamais supprimé : il est désactivé (`active: false`), et les caisses le retirent à leur synchronisation (§3). |
+| `GET/POST /api/admin/categories` · `PUT/DELETE …/{id}` | Idem pour les marques (`/brands`). Suppression refusée si des articles l'utilisent (`409 IN_USE`). |
+| `GET /api/admin/stock-moves?store_id&product_id&kind&from&to` | Mouvements : `sale`, `refund`, `cancel` (automatiques) et `receipt`, `adjustment`, `inventory`. |
+| `POST /api/admin/stock-moves` | `{ store_id, kind, note, lines: [{ product_id, quantity, unit_cost? }] }`, tout ou rien. `receipt` : quantité reçue (> 0), `unit_cost` met à jour le prix d'achat. `adjustment` : quantité ± avec motif obligatoire (`400 NOTE_REQUIRED`). `inventory` : quantité comptée, le stock y est mis. Quantité entière à la pièce, 3 décimales au kg. |
+
+Toute modification d'un article ou de son stock change son `updated_at` : les caisses le reçoivent à leur synchronisation suivante.
+
+### Ventes, retours, sessions
+
+| Route | Rôle |
+|---|---|
+| `GET /api/admin/sales?store_id&from&to&status&due&warning&customer_id&cashier_id&session_id&search` | Ventes avec payé, dû, déjà remboursé et signalements ; totaux de la sélection. `due=1` : ventes à crédit. Avec `session_id`, toutes les ventes de la session, sans filtre de date. |
+| `GET /api/admin/sales/{id}` | Vente (format §5), magasin, caisse, client, noms du caissier et du responsable, annulation, retours. |
+| `GET /api/admin/refunds?store_id&from&to` | Retours avec la vente d'origine et le motif. |
+| `GET /api/admin/cash-sessions?store_id&status&from&to` · `GET …/{id}` | Sessions avec attendus recalculés par l'API, comptages, écarts, mouvements d'espèces. |
+| `POST /api/admin/cash-sessions/{id}/force-close` | §8 point 7 : `{ note }` obligatoire. La session est clôturée sans comptage et marquée `forced`. Une caisse qui envoie encore des ventes de cette session les voit acceptées avec `session_closed: true` (§5). |
+
+L'annulation d'une vente passe par la route du §5 (`POST /api/sales/{id}/cancel`).
+
+### Clients et règlements
+
+| Route | Rôle |
+|---|---|
+| `GET /api/admin/customers?search&due` | Clients avec reste dû (`balance`), achats et dernier passage. |
+| `GET /api/admin/customers/{id}` | Client, reste dû, ventes, retours, règlements. |
+| `POST /api/admin/customers` · `PUT …/{id}` | Mêmes contrôles qu'au §4. §8 point 6 proposé : matricule unique (`409 MATRICULE_TAKEN`). |
+| `POST /api/admin/customers/{id}/payments` | Règlement d'une dette : `{ id?, store_id, method, amount, note }`, `method` ∈ `cash`, `card`, `mobile`. Idempotent par `id` (UUID). Jamais plus que le reste dû (`422 PAYMENT_EXCEEDS_BALANCE`). |
+
+Reste dû = crédit des ventes non annulées − crédit rendu par les retours − règlements.
+
+### Utilisateurs, magasins, balance (admin)
+
+| Route | Rôle |
+|---|---|
+| `GET/POST /api/admin/users` · `PUT …/{id}` | Identifiant unique, mot de passe de 8 caractères au moins, rôle, magasins (au moins un pour `manager` et `cashier`), `active`. §8 point 10 proposé : `pin` de 6 chiffres fixé ici, pour `admin` et `manager` seulement ; `null` le retire. Un mot de passe changé ou un compte désactivé coupe ses connexions. Il reste toujours un administrateur actif. |
+| `GET/POST /api/admin/stores` · `PUT …/{id}` | Nom, adresse et ICE (15 chiffres) du ticket, seuil d'écart de clôture, plafonds de remise du caissier (§2), `active`. |
+| `POST /api/admin/stores/{id}/registers` · `PUT /api/admin/registers/{id}` | Caisses du magasin. Une caisse avec une session ouverte ne peut pas être désactivée. |
+| `PUT /api/admin/stores/{id}/barcode-rules` | `{ rules }` au format du §3, contrôlées : code article d'au moins 1 chiffre, aucun préfixe début d'un autre. |
+
