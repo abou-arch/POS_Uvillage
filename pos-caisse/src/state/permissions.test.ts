@@ -3,7 +3,7 @@ import { formatMad } from '../lib/totals.js';
 import type { CartLine, MethodCount } from '../types';
 import { emptyCart, type CartState } from './cart';
 import {
-  afterFailure, closingNeedsApproval, discountNeedsApproval, discountsOverLimit, limitLabel, loadPinLock, lockLabel, lockRemaining,
+  afterFailure, allowedPage, closingNeedsApproval, managementPages, discountNeedsApproval, discountsOverLimit, limitLabel, loadPinLock, lockLabel, lockRemaining,
   MAX_PIN_FAILURES, needsApproval, NO_LOCK, overDiscountLimit, PIN_LOCK_MS, savePinLock, type DiscountLimits,
 } from './permissions';
 
@@ -127,5 +127,21 @@ describe('blocage après 3 PIN faux (§11)', () => {
     expect(lockLabel(60_000)).toBe('1 min');
     expect(lockLabel(45_200)).toBe('46 s');
     expect(lockLabel(300)).toBe('1 s');
+  });
+});
+
+describe('pages de gestion', () => {
+  it('le caissier ne voit ni le chiffre d’affaires ni les écarts de caisse', () => {
+    expect(managementPages('cashier')).toEqual(['sales', 'products', 'customers']);
+    expect(managementPages('manager')).toEqual(['dashboard', 'sales', 'sessions', 'products', 'customers', 'reports']);
+    expect(managementPages('admin')).toContain('reports');
+  });
+
+  it('page demandée si permise, sinon la première ouverte au rôle', () => {
+    expect(allowedPage('manager', 'reports')).toBe('reports');
+    expect(allowedPage('cashier', 'reports')).toBe('sales');
+    expect(allowedPage('cashier', 'dashboard')).toBe('sales');
+    expect(allowedPage('admin', null)).toBe('dashboard');
+    expect(allowedPage('admin', 'nimporte')).toBe('dashboard');
   });
 });

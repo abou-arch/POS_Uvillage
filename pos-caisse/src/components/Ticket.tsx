@@ -8,10 +8,11 @@ import type { PrintDoc } from '../state/usePrint';
 // entrée ou d'une sortie d'espèces, ou le rapport d'une session.
 // Rendu directement dans <body>, hors de l'écran : à l'impression, la feuille @media print cache tout le reste
 // (voir App.css). À l'écran, il n'est pas affiché.
-export function PrintSheet({ doc }: { doc: PrintDoc | null }) {
+// className : « management-print » pour une feuille demandée depuis l'espace Gestion (voir ManagementScreen).
+export function PrintSheet({ doc, className = '' }: { doc: PrintDoc | null; className?: string }) {
   if (!doc) return null;
   return createPortal(
-    <div className="ticket-print">
+    <div className={`ticket-print ${className}`}>
       {doc.kind === 'sale' && <SaleTicket receipt={doc.receipt} copy={doc.copy} />}
       {doc.kind === 'refund' && <RefundTicket receipt={doc.receipt} />}
       {doc.kind === 'movement' && <MovementTicket receipt={doc.receipt} />}

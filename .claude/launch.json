@@ -67,6 +67,21 @@
         "--strictPort"
       ],
       "port": 4174
+    },
+    {
+      "name": "caisse-demo",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "pos-caisse",
+        "run",
+        "dev:demo",
+        "--",
+        "--port",
+        "5175",
+        "--strictPort"
+      ],
+      "port": 5175
     }
   ]
 }

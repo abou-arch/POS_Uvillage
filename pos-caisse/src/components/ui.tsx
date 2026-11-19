@@ -28,6 +28,13 @@ const paths = {
   receipt: <><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" /><path d="M9 8h6M9 12h6M9 16h3" /></>,
   grid: <><rect x="4" y="4" width="6" height="6" rx="1.5" /><rect x="14" y="4" width="6" height="6" rx="1.5" /><rect x="4" y="14" width="6" height="6" rx="1.5" /><rect x="14" y="14" width="6" height="6" rx="1.5" /></>,
   clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
+  // Espace Gestion.
+  chart: <><path d="M3 20h18" /><path d="M6 16v-5M11 16V6M16 16v-8M21 16v-3" /></>,
+  box: <><path d="M3 7l9-4 9 4-9 4z" /><path d="M3 7v10l9 4 9-4V7M12 11v10" /></>,
+  users: <><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20c0-3.6 2.9-5.5 6.5-5.5s6.5 1.9 6.5 5.5" /><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.8c2 .6 3.5 2.2 3.5 5.2" /></>,
+  download: <><path d="M12 3v12M7 10l5 5 5-5" /><path d="M4 21h16" /></>,
+  trend: <><path d="M3 17l6-6 4 4 8-8" /><path d="M15 7h6v6" /></>,
+  calendar: <><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" /></>,
   // Pictogrammes des catégories d'articles (voir lib/categoryLook.ts).
   bread: <><path d="M6 20v-8a4 4 0 0 1-1-7.5C6.5 3.6 9 3 12 3s5.5.6 7 1.5a4 4 0 0 1-1 7.5v8a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1z" /><path d="M10 9.5l1 1M13.5 13l1 1" /></>,
   dairy: <><path d="M8 2h8v3l3 4v12a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V9l3-4z" /><path d="M8 5h8M5 9h14" /><path d="M12 13.5c-1.2 1.4-1.8 2.4-1.8 3.2a1.8 1.8 0 0 0 3.6 0c0-.8-.6-1.8-1.8-3.2z" /></>,

@@ -1,8 +1,9 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useContext, useEffect, useState, type ReactNode } from 'react';
 import { placeOf } from '../state/session';
 import { describeItem } from '../sync/sync';
 import type { SyncState } from '../sync/useSync';
 import type { Session } from '../types';
+import { ManageContext } from './management/shared';
 import { SyncStatus } from './SyncStatus';
 import { Avatar, Icon } from './ui';
 
@@ -17,6 +18,7 @@ export function TopBar({ session, sync, children, onLogout }: {
 }) {
   const { storeName, registerName } = placeOf(session);
   const rejected = sync.outbox.filter((e) => e.error !== null).length;
+  const openManagement = useContext(ManageContext); // null dans l'espace Gestion lui-même
   return (
     <header className="topbar">
       <span className="brand"><span className="logo"><Icon name="register" size={18} /></span>Caisse</span>
@@ -26,6 +28,12 @@ export function TopBar({ session, sync, children, onLogout }: {
       <SyncStatus connection={sync.connection} pending={sync.outbox.length} rejected={rejected} onSync={() => sync.sync(true)} />
       <span className="spacer" />
       <Clock />
+      {openManagement && (
+        <button className="held-button" onClick={() => openManagement()}
+          title="Gestion : tableau de bord, ventes, sessions, articles, clients, rapports">
+          <Icon name="chart" size={18} /><span className="label">Gestion</span>
+        </button>
+      )}
       {children}
       <span className="who" title={session.user.name}><Avatar name={session.user.name} /><span className="label">{session.user.name}</span></span>
       <button className="btn ghost" onClick={onLogout} title="Déconnexion">

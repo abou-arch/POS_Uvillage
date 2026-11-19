@@ -104,3 +104,28 @@ export function loadPinLock(storage = browserStorage()): PinLock {
 }
 
 export const savePinLock = (lock: PinLock, storage = browserStorage()) => writeJson(PIN_LOCK_KEY, lock, storage);
+
+// --- Pages de gestion du poste --------------------------------------------------------------------------
+
+/** Pages de l'espace « Gestion » (tableau de bord, ventes, sessions, articles, clients, rapports). */
+export type ManagementPage = 'dashboard' | 'sales' | 'sessions' | 'products' | 'customers' | 'reports';
+
+export const MANAGEMENT_PAGES: ManagementPage[] = ['dashboard', 'sales', 'sessions', 'products', 'customers', 'reports'];
+
+export const PAGE_LABELS: Record<ManagementPage, string> = {
+  dashboard: 'Tableau de bord', sales: 'Ventes', sessions: 'Sessions', products: 'Articles', customers: 'Clients', reports: 'Rapports',
+};
+
+/**
+ * Pages ouvertes à chaque rôle. Un caissier retrouve une vente, consulte le stock et les clients ; le chiffre d'affaires
+ * (tableau de bord, rapports) et les écarts de caisse (sessions) sont réservés au manager et à l'admin.
+ */
+export function managementPages(role: Role): ManagementPage[] {
+  return role === 'cashier' ? ['sales', 'products', 'customers'] : MANAGEMENT_PAGES;
+}
+
+/** Page à afficher : celle demandée si le rôle y a droit, sinon la première qui lui est ouverte. */
+export function allowedPage(role: Role, wanted: string | null | undefined): ManagementPage {
+  const pages = managementPages(role);
+  return pages.find((p) => p === wanted) ?? pages[0];
+}
