@@ -15,6 +15,17 @@ Autres commandes : `npm run mock` (API seule), `npm run dev` (caisse seule), `np
 
 Pour pointer vers la vraie API : créer un fichier `.env` avec `VITE_API_URL=https://…/api`.
 
+### Brancher la caisse sur le serveur de l'équipe
+
+Le serveur (`../server`, SQLite) applique tout le contrat et alimente le back-office (`../back-office`) :
+
+```bash
+npm --prefix ../server install && npm --prefix ../server run demo   # API sur le port 4100
+npm run dev:serveur                                                # caisse branchée dessus (.env.serveur)
+```
+
+Mêmes comptes de test. Les ventes, retours et sessions arrivent dans le back-office ; un prix ou un stock changé au back-office arrive dans la caisse à sa synchronisation suivante.
+
 ### Brancher la caisse sur BreakLine (passerelle)
 
 BreakLine, la plateforme de précommande de l'équipe, n'a pas encore les routes du contrat (ventes, sessions de caisse, retours…). En attendant, la fausse API sert de **passerelle** : la caisse lui parle comme d'habitude, sans aucun changement, et la passerelle :
@@ -96,5 +107,5 @@ Montants en **centimes** partout (jamais de flottants pour l'argent).
 - [x] 6c — Retours et remboursements
 - [x] 6d — Droits du caissier et autorisation d'un responsable (PIN)
 - [x] 6e — Articles au poids et historique des tickets (format réel de la balance à confirmer, voir « Données manquantes » du rapport)
-- [ ] 7 — Branchement sur la vraie API de l'équipe (en attendant : passerelle BreakLine pour le catalogue et le stock)
+- [x] 7 — Serveur de l'équipe (`server/`) et back-office (`back-office/`), contrat §12 proposé ; la passerelle BreakLine reste disponible
 - [ ] 8 — Revue finale avant livraison et tests en magasin

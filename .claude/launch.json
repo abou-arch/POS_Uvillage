@@ -82,6 +82,43 @@
         "--strictPort"
       ],
       "port": 5175
+    },
+    {
+      "name": "serveur",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "server",
+        "run",
+        "demo"
+      ],
+      "port": 4100
+    },
+    {
+      "name": "back-office",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "back-office",
+        "run",
+        "dev"
+      ],
+      "port": 5180
+    },
+    {
+      "name": "caisse-serveur",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "pos-caisse",
+        "run",
+        "dev:serveur",
+        "--",
+        "--port",
+        "5176",
+        "--strictPort"
+      ],
+      "port": 5176
     }
   ]
 }
