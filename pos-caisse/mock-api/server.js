@@ -1,16 +1,21 @@
 // Fausse API conforme à docs/API_CONTRACT.md — à remplacer par la vraie API de l'équipe web.
 // Lancement : npm run mock  (http://localhost:4000/api)
+// En passerelle vers BreakLine (npm run passerelle) : catalogue et stock viennent de BreakLine, voir breakline.js.
 import { pbkdf2Sync, randomBytes } from 'node:crypto';
 import express from 'express';
 import cors from 'cors';
 import { users, stores, categories, brands, products, customers, sales, cashSessions, cashMovements, refunds, barcodeRules } from './data.js';
 import { loadState, saveState } from './state.js';
+import { startBreakline } from './breakline.js';
 import { paidByLine, refundLine, saleTotals } from '../src/lib/totals.js';
 
 // Ventes, retours, sessions et stocks sont gardés dans mock-api/state.json : relancer la fausse API ne perd rien.
 const state = { sales, cashSessions, cashMovements, refunds, customers, products };
 loadState(state);
 const save = () => saveState(state);
+
+// Passerelle BreakLine, seulement si BREAKLINE_URL est défini (mock-api/breakline.env) : sinon, rien ne change.
+const breakline = process.env.BREAKLINE_URL ? startBreakline({ categories, brands, products, stores }) : null;
 
 const app = express();
 app.use(cors());
@@ -160,6 +165,7 @@ function createSale(sale) {
   }
   const approval_warning = approvalWarning(sale.approved_by, sale.store_id);
   sales.set(sale.id, { ...sale, session_closed, approval_warning, received_at: new Date().toISOString() });
+  breakline?.adjust(`sale:${sale.id}`, sale.lines.map((l) => [l.product_id, -l.quantity]));
   return { status: 201, body: { id: sale.id, status: 'created', stock_warning, session_closed } };
 }
 
@@ -190,6 +196,7 @@ app.post('/api/sales/:id/cancel', (req, res) => {
     const product = products.find((p) => p.id === line.product_id);
     if (product) product.stock_by_store[sale.store_id] = round3(product.stock_by_store[sale.store_id] + line.quantity);
   }
+  breakline?.adjust(`cancel:${sale.id}`, sale.lines.map((l) => [l.product_id, l.quantity]));
   sale.status = 'cancelled';
   save();
   res.json({ id: sale.id, status: 'cancelled' });
@@ -277,6 +284,7 @@ app.post('/api/refunds', (req, res) => {
     product.stock_by_store[b.store_id] = round3((product.stock_by_store[b.store_id] ?? 0) + l.quantity);
     product.updated_at = new Date().toISOString();
   }
+  breakline?.adjust(`refund:${b.id}`, b.lines.map((l) => [sale.lines[l.line_index].product_id, l.quantity]));
   const session_closed = session.status === 'closed';
   const approval_warning = approvalWarning(b.approved_by, b.store_id);
   refunds.set(b.id, { ...b, session_closed, approval_warning, received_at: new Date().toISOString() });

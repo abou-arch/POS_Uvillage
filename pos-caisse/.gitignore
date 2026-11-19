@@ -25,3 +25,7 @@ dist-ssr
 
 # État de la fausse API (ventes, sessions de caisse reçues)
 mock-api/state.json
+
+# Passerelle BreakLine : identifiants du compte et stock pas encore envoyé
+mock-api/breakline.env
+mock-api/breakline-state.json

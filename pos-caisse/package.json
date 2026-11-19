@@ -11,7 +11,9 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "mock": "node mock-api/server.js",
+    "passerelle": "node --env-file=mock-api/breakline.env mock-api/server.js",
     "dev:all": "concurrently -n api,pos \"npm run mock\" \"npm run dev\"",
+    "dev:breakline": "concurrently -n passerelle,pos \"npm run passerelle\" \"npm run dev\"",
     "test": "vitest run"
   },
   "dependencies": {

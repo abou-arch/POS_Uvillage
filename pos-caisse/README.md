@@ -15,6 +15,28 @@ Autres commandes : `npm run mock` (API seule), `npm run dev` (caisse seule), `np
 
 Pour pointer vers la vraie API : créer un fichier `.env` avec `VITE_API_URL=https://…/api`.
 
+### Brancher la caisse sur BreakLine (passerelle)
+
+BreakLine, la plateforme de précommande de l'équipe, n'a pas encore les routes du contrat (ventes, sessions de caisse, retours…). En attendant, la fausse API sert de **passerelle** : la caisse lui parle comme d'habitude, sans aucun changement, et la passerelle :
+
+- remplace le catalogue de démonstration par celui de BreakLine (articles, catégories, stock), relu toutes les 60 s ;
+- retire dans BreakLine le stock de chaque vente, et le remet pour un retour ou une annulation, une seule fois par opération même si la caisse la renvoie ;
+- garde ventes, sessions, retours, clients et comptes caissiers comme avant (`caissier` / `caissier`…).
+
+Mise en route, depuis le dossier `pos-caisse` (le compte va dans `breakline.env`, jamais dans `breakline.env.example` qui est commité) :
+
+```bash
+cp mock-api/breakline.env.example mock-api/breakline.env   # puis remplir l'adresse et le compte vendeur BreakLine
+npm run dev:breakline                                      # passerelle (port 4000) + caisse (port 5173)
+```
+
+À savoir :
+
+- **Ce qui manque à BreakLine** : pas de code-barres (le code article est le début de l'identifiant BreakLine, la douchette ne trouve rien), pas de TVA (`BREAKLINE_TVA_RATE`, 0 par défaut), pas de vente au poids ni de photo. Un article au prix ou au stock aberrant est ignoré et signalé dans le journal.
+- **Stock** : BreakLine l'ajuste unité par unité et ne descend jamais sous 0. Ce qui ne part pas (coupure, tunnel ngrok arrêté) attend dans `mock-api/breakline-state.json` et repart à la synchronisation suivante ; la caisse voit déjà le stock diminué. Si BreakLine est déjà à 0, le reste de la ligne est abandonné et signalé (la vente, elle, est bien enregistrée).
+- **ngrok** : l'adresse gratuite change à chaque redémarrage du tunnel ; il suffit de la remettre dans `breakline.env` et de relancer la passerelle.
+- **Limites** : BreakLine voit son stock bouger mais pas les ventes elles-mêmes (elles restent dans `mock-api/state.json`) ; les comptes caissiers sont ceux de démonstration, à changer avant un usage en magasin ; la passerelle ne doit tourner que sur le poste de caisse (elle écoute sur 127.0.0.1). Quand l'équipe aura ajouté les routes du contrat à BreakLine, on pointera la caisse directement dessus (`VITE_API_URL`) et la passerelle disparaîtra.
+
 La fausse API garde ce qu'elle reçoit (ventes, sessions de caisse, stocks) dans `mock-api/state.json`, ignoré par git : la relancer ne perd rien. Pour repartir de zéro : l'arrêter et supprimer ce fichier. Côté caisse, les données du poste sont dans IndexedDB (DevTools → Application → IndexedDB → `pos-caisse`) ; les données de test d'avant la version finale de l'étape 6b (ventes sans `session_id`, clôtures sans détail par moyen de paiement) y restent signalées comme illisibles : effacer cette base si besoin. Après la mise à jour, il faut aussi se reconnecter une fois : la session enregistrée n'a pas encore le seuil d'écart du magasin. L'étape 6c fait passer la base locale en version 3 (table des retours, index sur le numéro de ticket) : la mise à jour se fait seule au premier lancement, rien n'est perdu ; seules les ventes enregistrées avant l'étape 6c n'ont pas d'identifiant de ligne (leurs retours se font par le rang de la ligne, comme prévu au §5). L'étape 6d passe la base en version 4 (table des responsables et de l'empreinte de leur PIN), seule elle aussi ; il faut se reconnecter une fois, la session enregistrée n'ayant pas encore le plafond de remise du magasin. L'étape 6e (contrat 0.7) ne change pas la base : au premier lancement, la caisse retélécharge tout le catalogue pour recevoir l'unité de chaque article (`unit`).
 
 ## Structure
@@ -23,6 +45,7 @@ La fausse API garde ce qu'elle reçoit (ventes, sessions de caisse, stocks) dans
 docs/API_CONTRACT.md     contrat d'API (seule version qui fait foi), à valider avec l'équipe
 docs/SECURITE.md         audit de sécurité : en-têtes d'hébergement, propositions pour l'API, risques acceptés
 mock-api/                fausse API conforme au contrat (données des captures du POS actuel), état dans state.json
+mock-api/breakline.js    passerelle vers BreakLine : catalogue et stock lus et ajustés dans BreakLine (+ tests)
 src/
   api/client.ts          seul point d'accès à l'API
   lib/totals.js          calcul HT / TVA / TTC partagé avec la fausse API (+ tests)
@@ -69,5 +92,5 @@ Montants en **centimes** partout (jamais de flottants pour l'argent).
 - [x] 6c — Retours et remboursements
 - [x] 6d — Droits du caissier et autorisation d'un responsable (PIN)
 - [x] 6e — Articles au poids et historique des tickets (format réel de la balance à confirmer, voir « Données manquantes » du rapport)
-- [ ] 7 — Branchement sur la vraie API de l'équipe
+- [ ] 7 — Branchement sur la vraie API de l'équipe (en attendant : passerelle BreakLine pour le catalogue et le stock)
 - [ ] 8 — Revue finale avant livraison et tests en magasin

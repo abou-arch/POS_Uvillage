@@ -13,6 +13,17 @@
       "port": 4000
     },
     {
+      "name": "passerelle",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "pos-caisse",
+        "run",
+        "passerelle"
+      ],
+      "port": 4000
+    },
+    {
       "name": "caisse",
       "runtimeExecutable": "npm",
       "runtimeArgs": [
@@ -39,6 +50,23 @@
         "--strictPort"
       ],
       "port": 4173
+    },
+    {
+      "name": "demo-preview",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "pos-caisse",
+        "run",
+        "preview",
+        "--",
+        "--mode",
+        "demo",
+        "--port",
+        "4174",
+        "--strictPort"
+      ],
+      "port": 4174
     }
   ]
 }
