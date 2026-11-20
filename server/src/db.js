@@ -199,6 +199,65 @@ CREATE TABLE IF NOT EXISTS refunds (
 CREATE INDEX IF NOT EXISTS refunds_sale ON refunds(original_sale_id);
 CREATE INDEX IF NOT EXISTS refunds_created ON refunds(store_id, created_at);
 CREATE INDEX IF NOT EXISTS refunds_session ON refunds(session_id);
+CREATE TABLE IF NOT EXISTS suppliers (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  phone TEXT,
+  email TEXT,
+  address TEXT,
+  ice TEXT,
+  note TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS purchases (
+  id TEXT PRIMARY KEY,
+  number TEXT NOT NULL UNIQUE,
+  supplier_id TEXT NOT NULL REFERENCES suppliers(id),
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  invoice_ref TEXT,
+  invoice_date TEXT NOT NULL,
+  total INTEGER NOT NULL CHECK (total >= 0),
+  note TEXT,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS purchases_date ON purchases(store_id, invoice_date);
+CREATE INDEX IF NOT EXISTS purchases_supplier ON purchases(supplier_id);
+CREATE TABLE IF NOT EXISTS purchase_lines (
+  purchase_id TEXT NOT NULL REFERENCES purchases(id),
+  line INTEGER NOT NULL,
+  product_id TEXT NOT NULL REFERENCES products(id),
+  quantity INTEGER NOT NULL CHECK (quantity > 0),
+  unit_cost INTEGER NOT NULL CHECK (unit_cost >= 0),
+  total INTEGER NOT NULL,
+  PRIMARY KEY (purchase_id, line)
+);
+CREATE TABLE IF NOT EXISTS supplier_payments (
+  id TEXT PRIMARY KEY,
+  purchase_id TEXT NOT NULL REFERENCES purchases(id),
+  store_id TEXT NOT NULL,
+  method TEXT NOT NULL CHECK (method IN ('cash', 'card', 'transfer', 'cheque')),
+  amount INTEGER NOT NULL CHECK (amount > 0),
+  paid_on TEXT NOT NULL,
+  note TEXT,
+  user_id TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS supplier_payments_purchase ON supplier_payments(purchase_id);
+CREATE TABLE IF NOT EXISTS expenses (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  category TEXT NOT NULL,
+  amount INTEGER NOT NULL CHECK (amount > 0),
+  method TEXT NOT NULL CHECK (method IN ('cash', 'card', 'transfer', 'cheque')),
+  spent_on TEXT NOT NULL,
+  note TEXT,
+  user_id TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS expenses_date ON expenses(store_id, spent_on);
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -226,6 +285,12 @@ function migrate(db) {
   db.exec('CREATE INDEX IF NOT EXISTS customer_payments_session ON customer_payments(session_id)');
   // Contrat 0.8 : annulation demandée par un caissier, autorisée par un responsable (§5, §11).
   add('sales', 'cancel_approved_by', 'TEXT');
+  // Back-office : date de création d'un article (« articles ajoutés récemment » du tableau de bord).
+  if (!columns('products').has('created_at')) {
+    add('products', 'created_at', 'TEXT');
+    // Date inconnue pour les articles existants : leur premier mouvement de stock, sinon leur dernière modification.
+    db.exec(`UPDATE products SET created_at = COALESCE((SELECT MIN(created_at) FROM stock_moves m WHERE m.product_id = products.id), updated_at)`);
+  }
 }
 
 /** Exécute fn dans une transaction : tout ou rien. */

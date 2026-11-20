@@ -14,6 +14,20 @@ export function localParts(iso, timeZone) {
   return { day: `${parts.year}-${parts.month}-${parts.day}`, hour: Number(parts.hour) };
 }
 
+/** Instant (ISO, UTC) du début d'un jour local AAAA-MM-JJ dans le fuseau donné : bornes des jours et des mois. */
+export function localMidnight(day, timeZone) {
+  const wall = Date.parse(`${day}T00:00:00Z`);
+  const offsetAt = (t) => {
+    const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+      timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+    }).formatToParts(new Date(t)).map((x) => [x.type, x.value]));
+    return Date.parse(`${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}:${p.second}Z`) - t;
+  };
+  let t = wall - offsetAt(wall);
+  t = wall - offsetAt(t); // changement d'heure entre les deux estimations
+  return new Date(t).toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+
 const inList = (ids) => ids.map(() => '?').join(',') || 'NULL';
 
 /** Ventes et retours d'une période [from, to[ dans les magasins donnés. */

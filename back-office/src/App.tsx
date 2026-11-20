@@ -10,7 +10,9 @@ import { presetPeriod, type Period } from './lib/period'
 import { CategoriesPage } from './pages/CategoriesPage'
 import { CustomerPage, CustomersPage } from './pages/CustomersPage'
 import { DashboardPage } from './pages/DashboardPage'
+import { ExpensesPage } from './pages/ExpensesPage'
 import { ProductPage, ProductsPage } from './pages/ProductsPage'
+import { PurchasePage, PurchasesPage } from './pages/PurchasesPage'
 import { RefundsPage } from './pages/RefundsPage'
 import { ReportsPage } from './pages/ReportsPage'
 import { SalePage, SalesPage } from './pages/SalesPage'
@@ -18,6 +20,7 @@ import { SessionPage, SessionsPage } from './pages/SessionsPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { StockPage } from './pages/StockPage'
 import { StoresPage } from './pages/StoresPage'
+import { SupplierPage, SuppliersPage } from './pages/SuppliersPage'
 import { UsersPage } from './pages/UsersPage'
 
 interface NavItem { path: string; label: string; icon: IconName; admin?: boolean }
@@ -35,6 +38,11 @@ const NAV: { group: string; items: NavItem[] }[] = [
     { path: 'articles', label: 'Articles', icon: 'tag' },
     { path: 'categories', label: 'Catégories et marques', icon: 'layers' },
     { path: 'stock', label: 'Stock', icon: 'box' },
+  ] },
+  { group: 'Achats', items: [
+    { path: 'fournisseurs', label: 'Fournisseurs', icon: 'truck' },
+    { path: 'achats', label: 'Factures d’achat', icon: 'invoice' },
+    { path: 'depenses', label: 'Dépenses', icon: 'minus' },
   ] },
   { group: 'Clients', items: [{ path: 'clients', label: 'Clients', icon: 'users' }] },
   { group: 'Administration', items: [
@@ -172,6 +180,9 @@ function page([section = 'tableau-de-bord', id]: string[], isAdmin: boolean): Re
     case 'categories': return <CategoriesPage />
     case 'stock': return <StockPage />
     case 'clients': return id ? <CustomerPage id={id} /> : <CustomersPage />
+    case 'fournisseurs': return id ? <SupplierPage id={id} /> : <SuppliersPage />
+    case 'achats': return id ? <PurchasePage id={id} /> : <PurchasesPage />
+    case 'depenses': return <ExpensesPage />
     case 'utilisateurs': return isAdmin ? <UsersPage /> : <Forbidden />
     case 'magasins': return isAdmin ? <StoresPage /> : <Forbidden />
     case 'reglages': return isAdmin ? <SettingsPage /> : <Forbidden />

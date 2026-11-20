@@ -737,10 +737,19 @@ Révoque le token envoyé. Réponse `204`. Ouvert à tous les rôles.
 
 | Route | Rôle |
 |---|---|
-| `GET /api/admin/dashboard?store_id&from&to` | Rapport de la période, résumé de la période précédente de même durée, alertes de stock, sessions ouvertes avec leurs attendus, nombre d'opérations signalées (prix différent du catalogue, autorisation douteuse, vente reçue après la clôture, attendus différents à la clôture), clients qui doivent de l'argent. |
+| `GET /api/admin/dashboard?store_id&from&to&year` | Rapport de la période, résumé de la période précédente de même durée, alertes de stock, sessions ouvertes avec leurs attendus, nombre d'opérations signalées (prix différent du catalogue, autorisation douteuse, vente reçue après la clôture, attendus différents à la clôture), clients qui doivent de l'argent, et `overview` (ci-dessous). |
 | `GET /api/admin/reports?store_id&from&to` | Rapport : résumé (ventes, retours, net HT/TVA/TTC, panier moyen, annulations, remises, crédit accordé, marge si chaque article a un prix d'achat), par jour et par heure (fuseau des réglages), par moyen de paiement, article, catégorie, caissier, magasin, et par taux de TVA (retours déduits). |
 
 Les ventes annulées sont comptées à part. Le montant d'un article vendu est son payé (§7, remise globale répartie).
+
+`overview` (proposé, tableau de bord sur le modèle de Falcon POS), pour les magasins demandés :
+
+- `totals` depuis le début : `purchases_due` (factures d'achat − règlements fournisseurs), `sales_due` (crédit des ventes − crédit des retours − règlements clients, 0 au moins), `sales` (ventes nettes TTC : ventes encaissées − retours), `expenses` ;
+- `today_totals` pour la journée locale `today` : `purchases` (factures datées du jour), `received` (payé à la caisse hors crédit − rendu aux retours + règlements de dettes), `sales` (nettes), `expenses` ;
+- `counts` : clients, fournisseurs actifs, factures d'achat, ventes encaissées ;
+- `monthly` : `{ year, months: [{ month: "AAAA-MM", sales, purchases, expenses }] }`, 12 mois de l'année `year` (année en cours par défaut), mois bornés dans le fuseau des réglages ;
+- `period` : achats et dépenses datés de la période, dépenses par catégorie ;
+- `recent_products` : les 8 articles créés en dernier (`added_at`).
 
 ### Catalogue et stock
 
@@ -777,6 +786,24 @@ L'annulation d'une vente passe par la route du §5 (`POST /api/sales/{id}/cancel
 | `POST /api/admin/customers/{id}/payments` | Règlement d'une dette : `{ id?, store_id, method, amount, note }`, `method` ∈ `cash`, `card`, `mobile`. Idempotent par `id` (UUID). Jamais plus que le reste dû (`422 PAYMENT_EXCEEDS_BALANCE`). |
 
 Reste dû = crédit des ventes non annulées − crédit rendu par les retours − règlements (back-office et caisse, §4).
+
+### Fournisseurs, factures d'achat, dépenses (proposé)
+
+Jours au format `AAAA-MM-JJ` (fuseau des réglages), jamais dans le futur (le lendemain est toléré), pas avant 2000. Les listes datées filtrent sur ce jour à partir de `from`/`to`. Moyens de règlement : `cash`, `card`, `transfer`, `cheque`. Montants jusqu'à 10 millions de DH.
+
+| Route | Rôle |
+|---|---|
+| `GET /api/admin/suppliers?search&due` · `GET …/{id}` | Fournisseurs avec, pour les magasins de l'utilisateur, nombre de factures, total acheté, réglé, reste dû (`due`), date du dernier achat. Détail : ses 500 dernières factures. `due=1` : ceux à qui on doit. |
+| `POST /api/admin/suppliers` · `PUT …/{id}` | `{ name, phone?, email?, address?, ice?, note?, active? }`. Nom unique sans tenir compte des majuscules (`409 DUPLICATE`), téléphone de 6 à 15 chiffres, ICE de 15 chiffres. Un fournisseur n'est jamais supprimé : il est désactivé. |
+| `GET /api/admin/purchases?store_id&supplier_id&from&to&due&search` | Factures d'achat (numéro, référence du fournisseur, total, réglé, reste dû) et totaux de la sélection. |
+| `GET /api/admin/purchases/{id}` | Facture, lignes (article, quantité, prix d'achat unitaire, total), règlements. |
+| `POST /api/admin/purchases` | `{ id?, supplier_id, store_id, invoice_date, invoice_ref?, note?, lines: [{ product_id, quantity, unit_cost }], payment?: { amount, method, paid_on? } }`. Idempotent par `id` (UUID) : renvoyée telle quelle avec `status: "duplicate"`. Numéro `ACH-000001` attribué par l'API. Total d'une ligne = arrondi au centime de quantité × `unit_cost`. Tout ou rien : la marchandise entre en stock (mouvement `receipt` avec `ref_id` = la facture), un `unit_cost` > 0 devient le prix d'achat de l'article. Erreurs : `422 SUPPLIER_UNKNOWN`, `422 PRODUCT_UNKNOWN`, `400 INVALID_QUANTITY`, `422 PAYMENT_EXCEEDS_DUE`. |
+| `POST /api/admin/purchases/{id}/payments` | `{ id?, amount, method, paid_on?, note? }`. Idempotent par `id`. Jamais plus que le reste dû (`422 PAYMENT_EXCEEDS_DUE`, `details.due`). |
+| `GET /api/admin/expenses?store_id&category&from&to` | Dépenses, total, total par catégorie. |
+| `POST /api/admin/expenses` | `{ id?, store_id, category, amount, method, spent_on, note? }`, idempotent par `id`. `category` ∈ `rent`, `electricity`, `water`, `salaries`, `transport`, `supplies`, `maintenance`, `taxes`, `other` ; `other` exige une note (`400 NOTE_REQUIRED`). |
+| `DELETE /api/admin/expenses/{id}` | Dépense saisie par erreur. Réponse `204`. |
+
+Une facture d'achat ne se modifie ni ne se supprime : une erreur se corrige par un ajustement de stock (motif obligatoire). Les règlements fournisseurs et les dépenses payés en espèces ne sortent pas du tiroir d'une caisse : ils ne changent pas les attendus des sessions (§9).
 
 ### Utilisateurs, magasins, balance (admin)
 

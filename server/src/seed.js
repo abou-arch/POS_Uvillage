@@ -16,6 +16,7 @@ export function seedAdmin(db, { username, password, name = 'Administrateur' }) {
   tx(db, () => {
     run(db, 'INSERT INTO users (id, username, name, role, password_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)',
       `u_${randomUUID()}`, username, name, 'admin', hashPassword(password), nowIso());
+    run(db, 'UPDATE products SET created_at = updated_at WHERE created_at IS NULL');
     setSetting(db, 'tva_rates', DEFAULT_TVA_RATES);
   });
 }

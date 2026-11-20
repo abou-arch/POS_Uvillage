@@ -8,36 +8,12 @@ import { all, fromMilli, get, getSetting, nowIso, run, setSetting, stampNow, toM
 import { buildReport, loadLookup, loadPeriod, timezoneOf } from '../reports.js';
 import { hashPassword, hashPin, PIN_ITERATIONS, passwordProblem, pinProblem } from '../security.js';
 import { DEFAULT_TVA_RATES } from '../seed.js';
-import { clean, fail, fitsUnit, isDate, isDay, isId, isInt, isQuantity, isUuid, round3 } from '../validate.js';
+import { clean, fail, fitsUnit, isDay, isId, isInt, isQuantity, isUuid, round3 } from '../validate.js';
+import { inList, newId, pageOf, periodOf, storesOf } from './common.js';
 import { customerFields, expectedByMethod, publicSession } from './pos.js';
+import { overview, purchaseRoutes } from './purchases.js';
 
-const DAY = 86_400_000;
-const inList = (ids) => ids.map(() => '?').join(',') || 'NULL';
-const newId = (prefix) => `${prefix}_${randomUUID().slice(0, 8)}`;
 const bool = (v) => v === true || v === 1;
-
-/** Magasins visés : celui demandé (s'il est permis) ou tous ceux de l'utilisateur. */
-function storesOf(req) {
-  const wanted = req.query.store_id ? String(req.query.store_id) : '';
-  if (!wanted) return req.user.store_ids;
-  requireStore(req, wanted);
-  return [wanted];
-}
-
-/** Période [from, to[ en dates ISO ; 30 derniers jours par défaut ; 400 jours au plus. */
-function periodOf(req) {
-  const to = req.query.to ? String(req.query.to) : nowIso(new Date(Date.now() + 60_000));
-  const from = req.query.from ? String(req.query.from) : nowIso(new Date(Date.parse(to) - 30 * DAY));
-  if (!isDate(from) || !isDate(to) || Date.parse(from) >= Date.parse(to)) fail(400, 'INVALID_PERIOD', 'Période invalide');
-  if (Date.parse(to) - Date.parse(from) > 400 * DAY) fail(400, 'INVALID_PERIOD', 'Période trop longue (400 jours au plus)');
-  return { from: nowIso(new Date(from)), to: nowIso(new Date(to)) };
-}
-
-function pageOf(req, max = 500) {
-  const limit = Math.min(Math.max(Number.parseInt(req.query.limit ?? '100', 10) || 100, 1), max);
-  const offset = Math.max(Number.parseInt(req.query.offset ?? '0', 10) || 0, 0);
-  return { limit, offset };
-}
 
 const adminOnly = (req) => { if (req.user.role !== 'admin') fail(403, 'FORBIDDEN', 'Réservé à l’administrateur'); };
 const tvaRates = (db) => getSetting(db, 'tva_rates', DEFAULT_TVA_RATES);
@@ -92,6 +68,7 @@ export function adminRoutes(db, { pinIterations = PIN_ITERATIONS } = {}) {
           AND expected_mismatch = 1 AND closed_at >= ? AND closed_at < ?`, ...storeIds, from, to).n,
       },
       customers_due: { count: debtors.length, total: debtors.reduce((n, c) => n + c.balance, 0), top: debtors.slice(0, 5) },
+      overview: overview(db, { storeIds, from, to, timeZone: tz, year: req.query.year }),
     });
   });
 
@@ -134,6 +111,7 @@ export function adminRoutes(db, { pinIterations = PIN_ITERATIONS } = {}) {
       stock_alert, expiry_date, active, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id, fields.code, fields.barcode, fields.name, fields.name_ar, fields.category_id, fields.brand_id, fields.price_ttc, fields.cost_price,
     fields.tva_rate, fields.unit, fields.image_url, fields.stock_alert, fields.expiry_date, fields.active ? 1 : 0, stampNow());
+    run(db, 'UPDATE products SET created_at = ? WHERE id = ?', nowIso(), id);
     res.status(201).json(adminProduct(get(db, 'SELECT * FROM products WHERE id = ?', id), {}));
   });
 
@@ -409,6 +387,10 @@ export function adminRoutes(db, { pinIterations = PIN_ITERATIONS } = {}) {
       id, c.id, b.store_id, b.method, b.amount, clean(b.note), req.user.id, nowIso());
     res.status(201).json({ payment: get(db, 'SELECT * FROM customer_payments WHERE id = ?', id), balance: customerBalance(db, c.id), status: 'created' });
   });
+
+  // --- Fournisseurs, factures d'achat, dépenses (routes/purchases.js) -------------------------------------------
+
+  purchaseRoutes(r, db);
 
   // --- Utilisateurs (administrateur) ---------------------------------------------------------------------------
 

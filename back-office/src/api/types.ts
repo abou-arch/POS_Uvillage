@@ -125,6 +125,7 @@ export interface Dashboard {
   open_sessions: (Session & { expected: Record<'cash' | 'card' | 'mobile', number> })[]
   warnings: { price: number; approval: number; session_closed: number; expected_mismatch: number }
   customers_due: { count: number; total: number; top: Customer[] }
+  overview: Overview
 }
 
 export const METHOD_LABELS: Record<Method, string> = { cash: 'Espèces', card: 'Carte', mobile: 'Mobile', credit: 'Crédit' }
@@ -134,4 +135,50 @@ export const REASON_LABELS: Record<string, string> = {
 }
 export const MOVE_LABELS: Record<MoveKind, string> = {
   sale: 'Vente', refund: 'Retour', cancel: 'Annulation', receipt: 'Réception', adjustment: 'Ajustement', inventory: 'Inventaire',
+}
+
+// --- Achats et dépenses (contrat §12 proposé) ---------------------------------------------------------------------
+
+export type PayMethod = 'cash' | 'card' | 'transfer' | 'cheque'
+export const PAY_METHOD_LABELS: Record<PayMethod, string> = { cash: 'Espèces', card: 'Carte', transfer: 'Virement', cheque: 'Chèque' }
+
+export type ExpenseCategory = 'rent' | 'electricity' | 'water' | 'salaries' | 'transport' | 'supplies' | 'maintenance' | 'taxes' | 'other'
+export const EXPENSE_LABELS: Record<ExpenseCategory, string> = {
+  rent: 'Loyer', electricity: 'Électricité', water: 'Eau', salaries: 'Salaires', transport: 'Transport', supplies: 'Fournitures',
+  maintenance: 'Entretien', taxes: 'Impôts et taxes', other: 'Autre',
+}
+
+export interface Supplier {
+  id: string; name: string; phone: string | null; email: string | null; address: string | null; ice: string | null; note: string | null
+  active: boolean; created_at: string; updated_at: string
+  purchases_count: number; purchases_total: number; paid: number; due: number; last_purchase_on: string | null
+}
+export interface Purchase {
+  id: string; number: string; supplier_id: string; supplier_name: string; store_id: string; store_name: string
+  invoice_ref: string | null; invoice_date: string; total: number; paid: number; due: number; note: string | null
+  created_by: string; created_by_name: string | null; created_at: string; lines_count: number
+}
+export interface PurchaseLine { line: number; product_id: string; code: string; name: string; unit: Unit; quantity: number; unit_cost: number; total: number }
+export interface SupplierPayment {
+  id: string; purchase_id: string; method: PayMethod; amount: number; paid_on: string; note: string | null; user_name: string | null; created_at: string
+}
+export interface PurchaseDetail { purchase: Purchase; lines: PurchaseLine[]; payments: SupplierPayment[] }
+export interface PurchaseList { count: number; total: number; paid: number; due: number; items: Purchase[] }
+export interface SupplierDetail { supplier: Supplier; purchases: Purchase[] }
+
+export interface Expense {
+  id: string; store_id: string; store_name: string; category: ExpenseCategory; amount: number; method: PayMethod; spent_on: string
+  note: string | null; user_name: string | null; created_at: string
+}
+export interface ExpenseList { total: number; by_category: { category: ExpenseCategory; amount: number; count: number }[]; items: Expense[] }
+
+/** Chiffres du tableau de bord : totaux, journée, effectifs, année mois par mois, dépenses de la période, articles récents. */
+export interface Overview {
+  today: string
+  totals: { purchases_due: number; sales_due: number; sales: number; expenses: number }
+  today_totals: { purchases: number; received: number; sales: number; expenses: number }
+  counts: { customers: number; suppliers: number; purchases: number; sales: number }
+  monthly: { year: number; months: { month: string; sales: number; purchases: number; expenses: number }[] }
+  period: { purchases: number; expenses: number; expenses_by_category: { category: ExpenseCategory; amount: number; count: number }[] }
+  recent_products: { id: string; code: string; name: string; price_ttc: number; unit: Unit; added_at: string }[]
 }

@@ -8,6 +8,10 @@
   --text:#1f2937; --muted:#6b7280; --faint:#94a3b8;
   --shadow:0 1px 2px rgb(15 23 42 / .05); --shadow-lg:0 24px 60px rgb(15 23 42 / .25); --ring:0 0 0 3px rgb(31 111 181 / .22);
   --sidebar:248px;
+  /* Palette catégorielle des graphiques (ordre fixe : 1 ventes, 2 achats, 3 dépenses…), validée daltonisme */
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4; --s6:#008300; --s7:#6250d6; --s8:#e34948;
+  /* Tuiles du tableau de bord (décor, pas des séries) */
+  --t-cyan:#0e9fc0; --t-orange:#e8890c; --t-green:#16a34a; --t-red:#dc4a3d; --t-pink:#d6336c; --t-purple:#6d5dd3; --t-blue:#1f6fb5; --t-teal:#0f9f6e;
   font-family:'Inter Variable', system-ui, 'Segoe UI', Roboto, sans-serif; color:var(--text); line-height:1.45; font-size:14px;
   -webkit-font-smoothing:antialiased;
 }
@@ -144,6 +148,55 @@ td .sub { display:block; color:var(--muted); font-size:12px; }
 .hbar-track { height:8px; border-radius:99px; background:var(--line-soft); overflow:hidden; }
 .hbar-track span { display:block; height:100%; border-radius:99px; background:var(--blue); }
 
+/* Graphiques SVG */
+.chart { position:relative; padding:10px 12px 8px; min-width:0; }
+.chart svg { display:block; overflow:visible; }
+.chart .axis text, .chart .x-label { fill:var(--muted); font-size:11px; font-variant-numeric:tabular-nums; }
+.chart .grid-line { stroke:var(--line-soft); stroke-width:1; }
+.chart .baseline { stroke:var(--field); stroke-width:1; }
+.chart .hover-band { fill:var(--surface-2); }
+.chart .hit { fill:transparent; cursor:crosshair; }
+.chart .crosshair { stroke:var(--faint); stroke-width:1; stroke-dasharray:3 3; }
+.chart-legend { display:flex; flex-wrap:wrap; gap:6px 16px; padding:0 4px 6px; color:var(--text); font-size:12px; }
+.chart-legend span { display:inline-flex; align-items:center; gap:6px; }
+.chart-legend i, .chart-tip i, .donut-legend i { width:10px; height:10px; border-radius:3px; flex:none; }
+.chart-tip { position:absolute; z-index:5; transform:translate(-50%, -4px); display:grid; gap:3px; min-width:190px; white-space:nowrap; padding:8px 10px;
+  background:var(--surface); border:1px solid var(--line); border-radius:10px; box-shadow:0 8px 24px rgb(15 23 42 / .14); font-size:12px; pointer-events:none; }
+.chart-tip-row { display:flex; align-items:center; gap:6px; } .chart-tip-row b { margin-left:auto; padding-left:12px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.chart-empty { padding:16px; }
+.donut { display:flex; align-items:center; gap:16px; flex-wrap:wrap; padding:12px 16px 16px; }
+.donut svg { flex:none; } .donut path { cursor:pointer; transition:d .15s; }
+.donut-label { fill:var(--muted); font-size:10px; } .donut-value { fill:var(--text); font-size:13px; font-weight:700; }
+.donut-legend { flex:1; min-width:200px; display:grid; gap:2px; margin:0; padding:0; list-style:none; font-size:13px; }
+.donut-legend li { display:flex; align-items:center; gap:8px; padding:4px 6px; border-radius:6px; }
+.donut-legend li.on { background:var(--surface-2); } .donut-legend strong { font-variant-numeric:tabular-nums; }
+.donut-legend .share { width:38px; text-align:right; } .donut-legend .grow { flex:1; min-width:0; }
+.year-nav { display:inline-flex; align-items:center; gap:4px; font-weight:600; font-variant-numeric:tabular-nums; }
+.grid.split { grid-template-columns:minmax(0, 2fr) minmax(0, 1fr); align-items:start; }
+@media (max-width: 1100px) { .grid.split { grid-template-columns:minmax(0, 1fr); } }
+
+/* Tuiles du tableau de bord */
+.tiles { display:grid; gap:12px; grid-template-columns:repeat(4, minmax(0, 1fr)); }
+@media (max-width: 1180px) { .tiles { grid-template-columns:repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .tiles { grid-template-columns:minmax(0, 1fr); } }
+.tile { display:flex; align-items:stretch; min-width:0; background:var(--surface); border:1px solid var(--line); border-radius:12px; box-shadow:var(--shadow); overflow:hidden; color:inherit; text-decoration:none; }
+a.tile:hover { border-color:var(--blue-line); }
+.tile-icon { display:grid; place-items:center; flex:none; width:64px; color:#fff; }
+.tile-body { display:grid; align-content:center; gap:2px; padding:12px 14px; min-width:0; }
+.tile-label { color:var(--muted); font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
+.tile-value { font-size:19px; font-weight:700; font-variant-numeric:tabular-nums; letter-spacing:-.01em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.count-tile { position:relative; display:grid; grid-template-rows:1fr auto; min-height:120px; border-radius:12px; color:#fff; overflow:hidden; text-decoration:none; box-shadow:var(--shadow); }
+.count-tile .count-body { padding:14px 16px; display:grid; align-content:start; gap:4px; }
+.count-tile strong { font-size:30px; font-weight:750; font-variant-numeric:tabular-nums; line-height:1.1; }
+.count-tile span { font-size:12px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; opacity:.92; }
+.count-tile .count-icon { position:absolute; right:14px; top:12px; opacity:.28; }
+.count-tile footer { display:flex; align-items:center; justify-content:center; gap:6px; padding:6px; background:rgb(0 0 0 / .14); font-size:12px; font-weight:700; letter-spacing:.04em; }
+.count-tile:hover footer { background:rgb(0 0 0 / .24); }
+.section-title { display:flex; align-items:baseline; gap:8px; margin:8px 0 -4px; font-size:13px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+table.recent { table-layout:fixed; } table.recent th:first-child { width:44px; } table.recent th:last-child { width:120px; }
+table.recent td { padding-top:7px; padding-bottom:7px; } table.recent td a { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.stats.one { grid-template-columns:1fr; align-content:start; }
+
 /* Listes simples dans un panneau */
 .list { margin:0; padding:6px 0; list-style:none; }
 .list li { display:flex; align-items:center; gap:10px; padding:8px 16px; border-bottom:1px solid var(--line-soft); }
@@ -194,3 +247,5 @@ td .sub { display:block; color:var(--muted); font-size:12px; }
   .content { padding:16px 12px; }
 }
 @media (prefers-reduced-motion: reduce) { * { animation:none !important; transition:none !important; } }
+.modal > footer .grow { flex:1; }
+.list .swatch { width:10px; height:10px; border-radius:3px; flex:none; }

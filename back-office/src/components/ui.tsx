@@ -31,6 +31,15 @@ const PATHS = {
   refresh: 'M23 4v6h-6M1 20v-6h6M3.5 9a9 9 0 0 1 14.9-3.4L23 10M1 14l4.6 4.4A9 9 0 0 0 20.5 15',
   arrowLeft: 'M19 12H5M12 19l-7-7 7-7',
   lock: 'M5 11h14v10H5zM8 11V7a4 4 0 0 1 8 0v4',
+  truck: 'M1 4h14v12H1zM15 9h4l3 3v4h-7M5.5 21a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM18.5 21a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z',
+  bag: 'M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4zM3 6h18M16 10a4 4 0 0 1-8 0',
+  cart: 'M9 21a1 1 0 1 0 0-2 1 1 0 0 0 0 2zM20 21a1 1 0 1 0 0-2 1 1 0 0 0 0 2zM1 1h4l2.7 13.4a2 2 0 0 0 2 1.6h9.7a2 2 0 0 0 2-1.6L23 6H6M14 8v5M11.5 10.5h5',
+  coins: 'M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6',
+  minus: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM8 12h8',
+  invoice: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h5',
+  arrowRight: 'M5 12h14M12 5l7 7-7 7',
+  chevronLeft: 'M15 18l-6-6 6-6',
+  chevronRight: 'M9 18l6-6-6-6',
 } as const
 
 export type IconName = keyof typeof PATHS
@@ -66,7 +75,10 @@ export function Modal({ title, onClose, children, footer, wide }: {
   const titleId = useId()
   useEffect(() => {
     const d = ref.current
-    if (d && !d.open) d.showModal()
+    if (!d || d.open) return
+    d.showModal()
+    // showModal() donne le focus au premier élément focalisable (le bouton Fermer) : on le rend au premier champ.
+    d.querySelector<HTMLElement>('.modal-body input:not([type="hidden"]):not([disabled]), .modal-body select:not([disabled]), .modal-body textarea')?.focus()
   }, [])
   return (
     <dialog ref={ref} className={`modal${wide ? ' wide' : ''}`} aria-labelledby={titleId}
