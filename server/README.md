@@ -1,6 +1,6 @@
 # Serveur du POS
 
-API de la caisse (contrat [`pos-caisse/docs/API_CONTRACT.md`](../pos-caisse/docs/API_CONTRACT.md), §2 à §11) et du back-office (§12, proposé). Node 24, Express, base SQLite intégrée à Node (`node:sqlite`) : un seul fichier, aucune dépendance de plus.
+API de la caisse (contrat [`pos-caisse/docs/API_CONTRACT.md`](../pos-caisse/docs/API_CONTRACT.md), §2 à §11, avec les ajouts 0.8 proposés : reste dû des clients, règlement à la caisse, annulation autorisée par un responsable) et du back-office (§12, proposé). Node 24, Express, base SQLite intégrée à Node (`node:sqlite`) : un seul fichier, aucune dépendance de plus.
 
 ## Démarrer
 
@@ -18,7 +18,7 @@ npm --prefix ../back-office run dev          # back-office sur http://localhost:
 npm --prefix ../pos-caisse run dev:serveur   # caisse branchée sur ce serveur, http://localhost:5173
 ```
 
-Autres commandes : `npm start` (base existante), `npm run dev` (relance à chaque modification), `npm run seed -- --demo` (crée la base et s'arrête), `npm test` (40 tests : connexion, catalogue, ventes, retours, sessions, back-office, rapports).
+Autres commandes : `npm start` (base existante), `npm run dev` (relance à chaque modification), `npm run seed -- --demo` (crée la base et s'arrête), `npm test` (43 tests : connexion, catalogue, ventes, annulations, retours, règlements, sessions, back-office, rapports).
 
 Le port 4000 reste à la fausse API et à la passerelle BreakLine de la caisse : le serveur prend le 4100.
 

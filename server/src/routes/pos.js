@@ -1,10 +1,10 @@
-// Routes de la caisse, conformes à pos-caisse/docs/API_CONTRACT.md (contrat 0.7) : catalogue, clients, ventes,
-// retours, sessions de caisse, responsables, règles de la balance. Toutes demandent un token (voir app.js).
+// Routes de la caisse, conformes à pos-caisse/docs/API_CONTRACT.md (contrat 0.7, plus 0.8 proposé) : catalogue, clients,
+// règlements, ventes, retours, sessions de caisse, responsables, règles de la balance. Toutes demandent un token (voir app.js).
 import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import { paidByLine, refundLine, saleTotals } from '../../../pos-caisse/src/lib/totals.js';
 import {
-  approvalWarning, isResponsible, moveStock, parseDoc, publicProduct, requireStore,
+  approvalWarning, customerBalance, isResponsible, moveStock, parseDoc, publicProduct, requireStore,
 } from '../core.js';
 import { all, get, nowIso, run, toMilli, tx } from '../db.js';
 import {
@@ -58,22 +58,50 @@ export function posRoutes(db) {
     const like = `%${q.replace(/[%_]/g, '')}%`;
     const digits = q.replace(/\D/g, '');
     const local = /^0[5-7]/.test(digits) ? `212${digits.slice(1)}` : digits; // 06… retrouve +2126…
-    res.json(all(db, `SELECT id, name, phone, matricule FROM customers
+    const rows = all(db, `SELECT id, name, phone, matricule FROM customers
       WHERE lower(name) LIKE ? OR (? <> '' AND (replace(phone, '+', '') LIKE ? OR replace(phone, '+', '') LIKE ? OR matricule LIKE ?))
-      ORDER BY name LIMIT 20`, like, digits, `%${digits}%`, `%${local}%`, `%${digits}%`));
+      ORDER BY name LIMIT 20`, like, digits, `%${digits}%`, `%${local}%`, `%${digits}%`);
+    res.json(rows.map((c) => ({ ...c, balance: customerBalance(db, c.id) }))); // 0.8 : reste dû (§4)
   });
 
   r.post('/customers', (req, res) => {
     const b = req.body ?? {};
     if (b.id !== undefined && !isUuid(b.id)) fail(400, 'INVALID_DATA', 'id invalide');
     const known = b.id ? get(db, 'SELECT id, name, phone, matricule FROM customers WHERE id = ?', b.id) : null;
-    if (known) return res.status(200).json(known);
+    if (known) return res.status(200).json({ ...known, balance: customerBalance(db, known.id) });
     const customer = customerFields(b);
     const id = b.id ?? randomUUID();
     const now = nowIso();
     run(db, 'INSERT INTO customers (id, name, phone, matricule, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
       id, customer.name, customer.phone, customer.matricule, now, now);
-    res.status(201).json({ id, ...customer });
+    res.status(201).json({ id, ...customer, balance: 0 });
+  });
+
+  // Règlement d'une dette à la caisse (0.8, §4) : idempotent par id ; compté dans les attendus de sa session (§9). Fait
+  // hors ligne, il est accepté même si la session est clôturée ou s'il dépasse le reste dû : signalé au back-office.
+  r.post('/customer-payments', (req, res) => {
+    const b = req.body ?? {};
+    const known = get(db, 'SELECT * FROM customer_payments WHERE id = ?', typeof b.id === 'string' ? b.id : '');
+    if (known) {
+      return res.json({ id: known.id, status: 'duplicate', balance: customerBalance(db, known.customer_id),
+        session_closed: known.session_closed === 1, balance_exceeded: known.balance_exceeded === 1 });
+    }
+    if (!isUuid(b.id) || !isId(b.store_id) || !isId(b.register_id) || !isId(b.session_id) || !isId(b.customer_id)
+      || !COUNTED_METHODS.includes(b.method) || !isInt(b.amount, 1, 1e10) || !isNote(b.note) || !isId(b.created_by) || !isDate(b.created_at)) {
+      fail(400, 'INVALID_DATA', 'Règlement invalide');
+    }
+    requireStore(req, b.store_id);
+    if (!get(db, 'SELECT 1 AS x FROM customers WHERE id = ?', b.customer_id)) fail(404, 'NOT_FOUND', 'Client introuvable');
+    const { session, refused } = sessionOf(b);
+    if (!session) return res.status(refused.status).json(refused.body);
+    const sessionClosed = session.status === 'closed' ? 1 : 0;
+    const exceeded = b.amount > customerBalance(db, b.customer_id) ? 1 : 0;
+    run(db, `INSERT INTO customer_payments (id, customer_id, store_id, register_id, session_id, method, amount, note, user_id, created_at,
+      session_closed, balance_exceeded) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    b.id, b.customer_id, b.store_id, b.register_id, b.session_id, b.method, b.amount, clean(b.note), b.created_by, b.created_at,
+    sessionClosed, exceeded);
+    res.status(201).json({ id: b.id, status: 'created', balance: customerBalance(db, b.customer_id),
+      session_closed: sessionClosed === 1, balance_exceeded: exceeded === 1 });
   });
 
   // --- Ventes (§5) -------------------------------------------------------------------------------------------
@@ -160,18 +188,23 @@ export function posRoutes(db) {
     res.json({ results });
   });
 
+  // Annulation (§5) : un responsable, ou un caissier avec l'accord d'un responsable du magasin (approved_by, 0.8, §11).
   r.post('/sales/:id/cancel', (req, res) => {
-    if (!isResponsible(req.user.role)) fail(403, 'FORBIDDEN', 'Réservé au gérant');
+    const approvedBy = req.body?.approved_by ?? null;
+    if (!isOptId(approvedBy)) fail(400, 'INVALID_DATA', 'approved_by invalide');
     const row = get(db, 'SELECT * FROM sales WHERE id = ?', req.params.id);
     if (!row || !req.user.store_ids.includes(row.store_id)) fail(404, 'NOT_FOUND', 'Vente introuvable');
+    if (!isResponsible(req.user.role) && (approvedBy === null || approvalWarning(db, approvedBy, row.store_id) !== 0)) {
+      fail(403, 'FORBIDDEN', 'Annulation réservée à un responsable du magasin');
+    }
     if (row.status === 'cancelled') return res.json({ id: row.id, status: 'cancelled' });
     if (get(db, 'SELECT 1 AS x FROM refunds WHERE original_sale_id = ?', row.id)) {
       fail(422, 'SALE_REFUNDED', 'Cette vente a déjà des retours : elle ne peut plus être annulée');
     }
     const sale = parseDoc(row);
     tx(db, () => {
-      run(db, `UPDATE sales SET status = 'cancelled', cancelled_at = ?, cancelled_by = ?, doc = ? WHERE id = ?`,
-        nowIso(), req.user.id, JSON.stringify({ ...sale, status: 'cancelled' }), row.id);
+      run(db, `UPDATE sales SET status = 'cancelled', cancelled_at = ?, cancelled_by = ?, cancel_approved_by = ?, doc = ? WHERE id = ?`,
+        nowIso(), req.user.id, approvedBy, JSON.stringify({ ...sale, status: 'cancelled' }), row.id);
       for (const l of sale.lines) moveStock(db, { productId: l.product_id, storeId: row.store_id, delta: toMilli(l.quantity), kind: 'cancel', refId: row.id, userId: req.user.id });
     });
     res.json({ id: row.id, status: 'cancelled' });
@@ -353,7 +386,10 @@ export function publicSession(s) {
   return Object.fromEntries(SESSION_FIELDS.map((k) => [k, JSON_FIELDS.has(k) && s[k] ? JSON.parse(s[k]) : s[k] ?? null]));
 }
 
-/** Attendus d'après ce que le serveur a reçu (§9) : espèces = fond + ventes − remboursements + entrées − sorties. */
+/**
+ * Attendus d'après ce que le serveur a reçu (§9) : espèces = fond + ventes non annulées − remboursements
+ * + règlements de dettes + entrées − sorties ; carte et mobile de même, sans les mouvements.
+ */
 export function expectedByMethod(db, session) {
   const expected = { cash: session.opening_cash, card: 0, mobile: 0 };
   for (const row of all(db, `SELECT doc FROM sales WHERE session_id = ? AND status = 'completed'`, session.id)) {
@@ -361,6 +397,9 @@ export function expectedByMethod(db, session) {
   }
   for (const row of all(db, 'SELECT doc FROM refunds WHERE session_id = ?', session.id)) {
     for (const p of parseDoc(row).payments) if (p.method in expected) expected[p.method] -= p.amount;
+  }
+  for (const p of all(db, 'SELECT method, amount FROM customer_payments WHERE session_id = ?', session.id)) {
+    if (p.method in expected) expected[p.method] += p.amount;
   }
   for (const m of all(db, 'SELECT type, amount FROM cash_movements WHERE session_id = ?', session.id)) {
     expected.cash += m.type === 'in' ? m.amount : -m.amount;

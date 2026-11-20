@@ -4,7 +4,10 @@ import type { StoreInfo } from '../config/store';
 import { METHOD_LABELS } from '../state/payment';
 import type { CashMovement, Refund, Sale } from '../types';
 import { REFUND_REASONS } from './buildRefund';
-import { COUNTED_METHODS, denominationLabel, MOVEMENT_LABELS, sessionReport, type LocalCashMovement, type LocalCashSession } from './cashSession';
+import {
+  COUNTED_METHODS, denominationLabel, MOVEMENT_LABELS, sessionReport, type LocalCashMovement, type LocalCashSession, type SessionPayment,
+} from './cashSession';
+import type { LocalCustomerPayment } from './customerPayment';
 import { formatMad, vatBreakdownOfLines } from './totals.js';
 import { lineUnit, quantityDetail } from './units';
 
@@ -77,6 +80,7 @@ export interface SessionReceipt {
   sales: ReceiptRow[];
   methods: ReceiptRow[];
   refunds: ReceiptRow[]; // retours de la session (vide s'il n'y en a pas)
+  payments: ReceiptRow[]; // règlements de dettes de la session (vide s'il n'y en a pas, contrat 0.8)
   vat: { rate: string; ht: string; tva: string }[];
   totals: ReceiptRow[];
   movements: ReceiptRow[];
@@ -103,6 +107,7 @@ export function buildSessionReceipt(input: {
   sales: Sale[];
   movements: CashMovement[];
   refunds?: Refund[]; // retours faits dans la session
+  payments?: SessionPayment[]; // règlements de dettes encaissés dans la session
   registerName: string;
   printedAt: Date;
   store: StoreInfo;
@@ -111,8 +116,9 @@ export function buildSessionReceipt(input: {
 }): SessionReceipt {
   const { session, timeZone } = input;
   const closed = session.status === 'closed';
-  const report = sessionReport(session, input.sales, input.movements, input.refunds ?? []);
+  const report = sessionReport(session, input.sales, input.movements, input.refunds ?? [], input.payments ?? []);
   const hasRefunds = report.refundsCount > 0;
+  const hasPayments = report.paymentsCount > 0;
   const date = (iso: string) => receiptDate(iso, timeZone);
 
   const info: ReceiptRow[] = [
@@ -159,6 +165,9 @@ export function buildSessionReceipt(input: {
     sales: [
       { label: 'Nombre de ventes', value: String(report.salesCount) },
       { label: 'Total TTC', value: formatMad(report.totals.ttc) },
+      ...(report.cancelledCount > 0
+        ? [{ label: `Annulées (non comptées) : ${report.cancelledCount}`, value: formatMad(report.cancelledTotal) }]
+        : []),
     ],
     methods: report.byMethod.map((m) => ({ label: METHOD_LABELS[m.method], value: formatMad(m.amount) })),
     refunds: hasRefunds
@@ -169,6 +178,14 @@ export function buildSessionReceipt(input: {
           .map((m) => ({ label: `  ${METHOD_LABELS[m.method]}`, value: signedMad(-m.amount) })),
       ]
       : [],
+    payments: hasPayments
+      ? [
+        { label: 'Nombre de règlements', value: String(report.paymentsCount) },
+        { label: 'Total reçu', value: signedMad(report.paymentsTotal) },
+        ...report.paymentsByMethod.filter((m) => m.amount > 0)
+          .map((m) => ({ label: `  ${METHOD_LABELS[m.method]}`, value: signedMad(m.amount) })),
+      ]
+      : [],
     vat: report.vat.map((g) => ({ rate: `${g.rate} %`, ht: formatMad(g.ht), tva: formatMad(g.tva) })),
     totals: [{ label: 'Total HT', value: formatMad(report.totals.ht) }, { label: 'Total TVA', value: formatMad(report.totals.tva) }],
     movements,
@@ -176,6 +193,7 @@ export function buildSessionReceipt(input: {
       { label: 'Fond de caisse', value: formatMad(report.openingCash) },
       { label: 'Espèces des ventes', value: signedMad(report.cashSales) },
       ...(hasRefunds ? [{ label: 'Remboursements', value: signedMad(-report.cashRefunds) }] : []),
+      ...(hasPayments ? [{ label: 'Règlements clients', value: signedMad(report.cashPayments) }] : []),
       { label: 'Entrées', value: signedMad(report.cashIn) },
       { label: 'Sorties', value: signedMad(-report.cashOut) },
     ],
@@ -273,5 +291,41 @@ export function buildRefundReceipt(data: RefundReceiptData, store: StoreInfo, ti
     payments: refund.payments.map((p) => ({
       label: p.method === 'credit' ? 'Déduit du crédit' : `Rendu en ${METHOD_LABELS[p.method].toLowerCase()}`, value: formatMad(p.amount),
     })),
+  };
+}
+
+// --- Reçu 80 mm d'un règlement de dette (contrat 0.8) -----------------------------------------------------
+
+export interface PaymentReceipt {
+  store: StoreInfo;
+  copy: boolean;
+  info: ReceiptRow[];
+  amount: ReceiptRow;
+  balance: ReceiptRow[]; // reste dû avant et après, quand il était connu (en ligne)
+  note: string | null;
+}
+
+/** Reçu remis au client qui règle sa dette, tiré du règlement ENREGISTRÉ. */
+export function buildPaymentReceipt(input: {
+  payment: LocalCustomerPayment; registerName: string; store: StoreInfo; timeZone: string; copy: boolean;
+}): PaymentReceipt {
+  const { payment } = input;
+  const before = payment.balance_before;
+  return {
+    store: input.store,
+    copy: input.copy,
+    info: [
+      { label: 'Caisse', value: input.registerName },
+      { label: 'Date', value: receiptDate(payment.created_at, input.timeZone) },
+      { label: 'Caissier', value: payment.cashier_name },
+      { label: 'Client', value: payment.customer_name },
+      { label: 'Payé en', value: METHOD_LABELS[payment.method].toLowerCase() },
+    ],
+    amount: { label: 'MONTANT REÇU', value: formatMad(payment.amount) },
+    balance: before === null ? [] : [
+      { label: 'Reste dû avant', value: formatMad(before) },
+      { label: 'Reste dû après', value: formatMad(before - payment.amount) },
+    ],
+    note: payment.note,
   };
 }

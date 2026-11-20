@@ -8,7 +8,8 @@
 // - le montant d'un article est la part réellement payée de sa ligne (remise globale et autres charges réparties, §7) ;
 // - les espèces d'une vente sont déjà nettes du rendu de monnaie (§5).
 import type { LocalCashMovement, LocalCashSession } from './cashSession';
-import { cashOfSale, movementTotals } from './cashSession';
+import { expectedCash, movementTotals } from './cashSession';
+import type { CustomerPayment } from '../types';
 import type { ReceiptData } from './receipt';
 import { paidByLine, vatBreakdownOfLines } from './totals.js';
 import { lineUnit } from './units';
@@ -255,13 +256,14 @@ export interface SessionRow {
   net: number; // TTC des ventes − retours de la session
   cashIn: number; // entrées d'espèces
   cashOut: number; // sorties d'espèces
-  expectedCash: number; // fond + espèces des ventes − espèces rendues + entrées − sorties
+  expectedCash: number; // fond + espèces des ventes − espèces rendues + règlements en espèces + entrées − sorties
   difference: number | null; // somme des écarts de clôture ; null tant qu'elle est ouverte
 }
 
 /** Une ligne par session, la plus récente d'abord. Les ventes, retours et mouvements sont rattachés par session_id. */
 export function sessionRows(
   sessions: LocalCashSession[], sales: Sale[], refunds: Refund[], movements: LocalCashMovement[],
+  payments: Pick<CustomerPayment, 'session_id' | 'method' | 'amount'>[] = [],
 ): SessionRow[] {
   const group = <T extends { session_id: string }>(list: T[]) => {
     const map = new Map<string, T[]>();
@@ -271,19 +273,20 @@ export function sessionRows(
   const salesOf = group(sales);
   const refundsOf = group(refunds);
   const movesOf = group(movements);
+  const paymentsOf = group(payments);
   return sessions
     .map((session): SessionRow => {
       const ok = completed(salesOf.get(session.id) ?? []);
       const rf = refundsOf.get(session.id) ?? [];
-      const moves = movementTotals(movesOf.get(session.id) ?? []);
+      const moveList = movesOf.get(session.id) ?? [];
+      const moves = movementTotals(moveList);
       return {
         session,
         tickets: ok.length,
         net: ok.reduce((s, x) => s + x.totals.ttc, 0) - rf.reduce((s, x) => s + x.totals.ttc, 0),
         cashIn: moves.in,
         cashOut: moves.out,
-        expectedCash: session.opening_cash + ok.reduce((s, x) => s + cashOfSale(x), 0) - rf.reduce((s, x) => s + cashOfSale(x), 0)
-          + moves.in - moves.out,
+        expectedCash: expectedCash(session.opening_cash, ok, moveList, rf, paymentsOf.get(session.id) ?? []),
         difference: session.status === 'closed' && session.counts ? session.counts.reduce((s, c) => s + c.difference, 0) : null,
       };
     })
@@ -297,12 +300,14 @@ export interface CustomerRow {
   name: string;
   purchases: number;
   net: number; // TTC acheté − rendu
-  credit: number; // reste dû : paiements à crédit − crédit rendu par les retours
+  credit: number; // reste dû sur ce poste : paiements à crédit − crédit rendu par les retours − règlements reçus ici
   last: string; // date du dernier achat
 }
 
 /** Clients qui ont acheté sur ce poste (le client de passage n'en fait pas partie), le plus gros acheteur d'abord. */
-export function customerRows(receipts: ReceiptData[], refunds: Refund[]): CustomerRow[] {
+export function customerRows(
+  receipts: ReceiptData[], refunds: Refund[], payments: Pick<CustomerPayment, 'customer_id' | 'amount'>[] = [],
+): CustomerRow[] {
   const rows = new Map<string, CustomerRow>();
   for (const { sale, customer } of receipts) {
     if (!sale.customer_id || sale.status === 'cancelled') continue;
@@ -320,6 +325,10 @@ export function customerRows(receipts: ReceiptData[], refunds: Refund[]): Custom
     if (!r) continue;
     r.net -= rf.totals.ttc;
     r.credit -= rf.payments.filter((p) => p.method === 'credit').reduce((s, p) => s + p.amount, 0);
+  }
+  for (const p of payments) {
+    const r = rows.get(p.customer_id);
+    if (r) r.credit -= p.amount;
   }
   return [...rows.values()].sort((a, b) => b.net - a.net || a.name.localeCompare(b.name, 'fr'));
 }

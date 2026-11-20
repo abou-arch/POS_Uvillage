@@ -1,6 +1,7 @@
 // Base locale de la caisse (IndexedDB via Dexie) : ce qui permet de vendre sans connexion.
 import Dexie, { type EntityTable, type Table } from 'dexie';
 import type { LocalCashMovement, LocalCashSession } from '../lib/cashSession';
+import type { LocalCustomerPayment } from '../lib/customerPayment';
 import type { ReceiptData } from '../lib/receipt';
 import type { HeldSale } from '../state/held';
 import type { OutboxItem } from '../sync/sync';
@@ -56,6 +57,7 @@ export type PosDb = Dexie & {
   journal: EntityTable<JournalRow, 'id'>;
   refunds: EntityTable<RefundRow, 'id'>;
   approvers: Table<ApproverRow, [string, string]>;
+  customer_payments: EntityTable<LocalCustomerPayment, 'id'>;
 };
 
 export const db = new Dexie('pos-caisse') as PosDb;
@@ -87,6 +89,11 @@ db.version(3).stores({
 // Version 4 (contrat 0.6) : responsables de chaque magasin et empreinte de leur PIN, pour autoriser hors ligne (§11).
 db.version(4).stores({
   approvers: '[store_id+user_id], store_id',
+});
+
+// Version 5 (contrat 0.8) : règlements de dettes encaissés à la caisse, comptés dans les attendus de leur session (§9).
+db.version(5).stores({
+  customer_payments: 'id, session_id',
 });
 
 export const counterKey = (registerId: string) => `ticketCounter.${registerId}`;

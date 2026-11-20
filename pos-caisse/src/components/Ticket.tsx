@@ -1,11 +1,11 @@
 import { createPortal } from 'react-dom';
 import { THANK_YOU, type StoreInfo } from '../config/store';
 import { code128 } from '../lib/code128';
-import type { MovementReceipt, Receipt, ReceiptRow, RefundReceipt, SessionReceipt } from '../lib/receipt';
+import type { MovementReceipt, PaymentReceipt, Receipt, ReceiptRow, RefundReceipt, SessionReceipt } from '../lib/receipt';
 import type { PrintDoc } from '../state/usePrint';
 
 // Ce que l'imprimante 80 mm sort (voir state/usePrint.ts) : un ticket de vente, un ticket de retour, le ticket d'une
-// entrée ou d'une sortie d'espèces, ou le rapport d'une session.
+// entrée ou d'une sortie d'espèces, le reçu d'un règlement de dette, ou le rapport d'une session.
 // Rendu directement dans <body>, hors de l'écran : à l'impression, la feuille @media print cache tout le reste
 // (voir App.css). À l'écran, il n'est pas affiché.
 // className : « management-print » pour une feuille demandée depuis l'espace Gestion (voir ManagementScreen).
@@ -16,6 +16,7 @@ export function PrintSheet({ doc, className = '' }: { doc: PrintDoc | null; clas
       {doc.kind === 'sale' && <SaleTicket receipt={doc.receipt} copy={doc.copy} />}
       {doc.kind === 'refund' && <RefundTicket receipt={doc.receipt} />}
       {doc.kind === 'movement' && <MovementTicket receipt={doc.receipt} />}
+      {doc.kind === 'payment' && <PaymentTicket receipt={doc.receipt} />}
       {doc.kind === 'session' && <SessionTicket report={doc.report} />}
     </div>,
     document.body,
@@ -157,6 +158,28 @@ function MovementTicket({ receipt }: { receipt: MovementReceipt }) {
   );
 }
 
+// Règlement d'une dette : le reçu remis au client, avec ce qu'il doit encore quand la caisse le savait.
+function PaymentTicket({ receipt }: { receipt: PaymentReceipt }) {
+  return (
+    <div className="receipt">
+      <StoreHeader store={receipt.store} />
+      <hr />
+      <p className="t-center t-title">REÇU DE RÈGLEMENT</p>
+      {receipt.copy && <p className="t-center t-strong">*** DUPLICATA ***</p>}
+      <hr />
+      {receipt.info.map((r) => <Row key={r.label} {...r} />)}
+      {receipt.note && <p>Note : {receipt.note}</p>}
+      <hr />
+      <Row {...receipt.amount} className="t-total" />
+      {receipt.balance.length > 0 && <hr />}
+      {receipt.balance.map((r) => <Row key={r.label} {...r} />)}
+      <hr />
+      <footer className="t-center">Merci de votre règlement</footer>
+      <hr />
+    </div>
+  );
+}
+
 // Rapport de session, même mise en page que le ticket : ventes, moyens de paiement, TVA par taux, espèces.
 function SessionTicket({ report }: { report: SessionReceipt }) {
   return (
@@ -176,6 +199,12 @@ function SessionTicket({ report }: { report: SessionReceipt }) {
         <>
           <p className="t-strong">RETOURS</p>
           {report.refunds.map((r) => <Row key={r.label} {...r} />)}
+        </>
+      )}
+      {report.payments.length > 0 && (
+        <>
+          <p className="t-strong">RÈGLEMENTS CLIENTS</p>
+          {report.payments.map((r) => <Row key={r.label} {...r} />)}
         </>
       )}
       <hr />

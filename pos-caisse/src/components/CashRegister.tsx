@@ -3,7 +3,7 @@ import { useCashSessions } from '../db/cashSessions';
 import { allowedPage, type ManagementPage } from '../state/permissions';
 import { useSync } from '../sync/useSync';
 import type { Session } from '../types';
-import { ManageContext } from './management/shared';
+import { ManageContext, type SaleRequest } from './management/shared';
 import { ManagementScreen } from './management/ManagementScreen';
 import { OpeningScreen } from './OpeningScreen';
 import { PosScreen } from './PosScreen';
@@ -28,6 +28,7 @@ export function CashRegister({ session, onLogout }: { session: Session; onLogout
   const cash = useCashSessions(session.registerId);
   const [closedNow, setClosedNow] = useState<string | null>(null);
   const [managing, setManaging] = useState(readHash);
+  const [saleRequest, setSaleRequest] = useState<SaleRequest | null>(null); // retour ou annulation demandés depuis la Gestion
 
   useEffect(() => {
     const onHash = () => setManaging(readHash());
@@ -43,6 +44,9 @@ export function CashRegister({ session, onLogout }: { session: Session; onLogout
     setManaging(null);
   }, []);
 
+  // Retour ou annulation choisis dans la Gestion : faits sur l'écran de caisse, resté monté dessous.
+  const saleAction = (request: SaleRequest) => { closeManagement(); setSaleRequest(request); };
+
   // Déconnexion depuis la Gestion : l'adresse est remise à zéro, le caissier suivant arrive sur la caisse.
   const logoutFromManagement = () => { closeManagement(); onLogout(); };
 
@@ -51,13 +55,14 @@ export function CashRegister({ session, onLogout }: { session: Session; onLogout
     <ManageContext.Provider value={navigate}>
       {cash.open ? (
         <PosScreen key={cash.open.id} session={session} cashSession={cash.open} sync={sync} unreadableSessions={cash.unreadable}
-          onClosed={setClosedNow} onLogout={onLogout} />
+          request={saleRequest} onClosed={setClosedNow} onLogout={onLogout} />
       ) : (
         <OpeningScreen session={session} sync={sync} lastClosed={cash.lastClosed} closedNow={closedNow}
           unreadable={sync.outboxUnreadable + cash.unreadable} storageError={cash.storageError || sync.storageError} onLogout={onLogout} />
       )}
       {managing && (
         <ManagementScreen session={session} sync={sync} page={allowedPage(session.user.role, managing.page)}
+          openSessionId={cash.open?.id ?? null} onSaleAction={cash.open ? saleAction : null}
           onNavigate={navigate} onClose={closeManagement}
           onLogout={logoutFromManagement} />
       )}

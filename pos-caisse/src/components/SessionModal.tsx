@@ -7,13 +7,16 @@ import { Icon } from './ui';
 
 // Session en cours : où en est la caisse, et ce qu'on peut y faire (entrée / sortie, rapport X, clôture).
 export function SessionModal({
-  session, salesCount, salesTotal, refundsCount, refundsTotal, expected, movements, onMovement, onReprintMovement, onReport, onCloseSession, onClose,
+  session, salesCount, salesTotal, refundsCount, refundsTotal, paymentsCount = 0, paymentsTotal = 0, expected, movements, onMovement,
+  onReprintMovement, onReport, onCloseSession, onClose,
 }: {
   session: LocalCashSession;
   salesCount: number;
   salesTotal: number;
   refundsCount: number;
   refundsTotal: number;
+  paymentsCount?: number; // règlements de dettes (contrat 0.8)
+  paymentsTotal?: number;
   expected: Expected;
   movements: LocalCashMovement[];
   onMovement: () => void;
@@ -31,6 +34,7 @@ export function SessionModal({
           <div><dt>Fond de caisse</dt><dd>{formatMad(session.opening_cash)}</dd></div>
           <div><dt>Ventes</dt><dd>{salesCount} · {formatMad(salesTotal)}</dd></div>
           <div><dt>Retours</dt><dd>{refundsCount} · {signedMad(-refundsTotal)}</dd></div>
+          {paymentsCount > 0 && <div><dt>Règlements clients</dt><dd>{paymentsCount} · {signedMad(paymentsTotal)}</dd></div>}
           <div><dt>Carte · mobile attendus</dt><dd>{formatMad(expected.card)} · {formatMad(expected.mobile)}</dd></div>
           <div className="strong"><dt>Espèces attendues</dt><dd>{formatMad(expected.cash)}</dd></div>
         </dl>

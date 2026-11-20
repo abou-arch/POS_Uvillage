@@ -8,7 +8,7 @@ import type { Session } from '../../types';
 import { PrintSheet } from '../Ticket';
 import { TopBar } from '../TopBar';
 import { Icon, type IconName } from '../ui';
-import { ManageContext, type ManagementPrint, type PageProps } from './shared';
+import { ManageContext, type ManagementPrint, type PageProps, type SaleRequest } from './shared';
 import { CustomersPage } from './CustomersPage';
 import { DashboardPage } from './DashboardPage';
 import { ProductsPage } from './ProductsPage';
@@ -43,10 +43,12 @@ function useManagementPrint() {
 // articles, clients, rapports), ouvert en plein écran au-dessus de la caisse : le panier en cours est gardé, et
 // les raccourcis de paiement (F2, F4) ne partent pas tant qu'une fenêtre est ouverte. Tout est calculé à partir de
 // ce que ce poste a enregistré, même hors ligne.
-export function ManagementScreen({ session, sync, page, onNavigate, onClose, onLogout }: {
+export function ManagementScreen({ session, sync, page, openSessionId, onSaleAction, onNavigate, onClose, onLogout }: {
   session: Session;
   sync: SyncState;
   page: ManagementPage;
+  openSessionId: string | null;
+  onSaleAction: ((request: SaleRequest) => void) | null;
   onNavigate: (page: ManagementPage) => void;
   onClose: () => void;
   onLogout: () => void;
@@ -68,7 +70,7 @@ export function ManagementScreen({ session, sync, page, onNavigate, onClose, onL
   const content = useRef<HTMLDivElement>(null);
   useEffect(() => { content.current?.scrollTo({ top: 0 }); }, [page]);
 
-  const props: PageProps = { session, data, print, onNavigate };
+  const props: PageProps = { session, data, print, onNavigate, openSessionId, onSaleAction };
   return (
     <dialog ref={ref} className="management" aria-label="Gestion de la caisse"
       onCancel={(e) => { e.preventDefault(); if (e.target === ref.current) onClose(); }}>

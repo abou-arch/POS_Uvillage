@@ -6,6 +6,7 @@ import {
   closedSession, isLocalMovement, isLocalSession, openedSession, sessionsToPrune, type LocalCashMovement, type LocalCashSession,
 } from '../lib/cashSession';
 import { isRefund } from '../lib/buildRefund';
+import { isLocalCustomerPayment, type LocalCustomerPayment } from '../lib/customerPayment';
 import { buildSessionReceipt, type ReceiptData, type SessionReceipt } from '../lib/receipt';
 import { isSale } from '../state/sales';
 import { closeKey, isOutboxItem, itemSession } from '../sync/sync';
@@ -50,20 +51,23 @@ export async function closeCashSession(
   });
 }
 
-export interface CashSessionData { sales: Sale[]; movements: LocalCashMovement[]; refunds: Refund[] }
+/** sales : toutes les ventes de la session, annulées comprises (les calculs les écartent, §5). */
+export interface CashSessionData { sales: Sale[]; movements: LocalCashMovement[]; refunds: Refund[]; payments: LocalCustomerPayment[] }
 
-/** Ventes, retours et mouvements enregistrés dans une session (pour le rapport et l'attendu de la clôture). */
+/** Ventes, retours, règlements et mouvements enregistrés dans une session (pour le rapport et l'attendu de la clôture). */
 export async function cashSessionData(sessionId: string): Promise<CashSessionData> {
-  const [journal, movements, refunds] = await Promise.all([
+  const [journal, movements, refunds, payments] = await Promise.all([
     db.journal.where('session_id').equals(sessionId).toArray(),
     db.cash_movements.where('session_id').equals(sessionId).toArray(),
     db.refunds.where('session_id').equals(sessionId).toArray(),
+    db.customer_payments.where('session_id').equals(sessionId).toArray(),
   ]);
   const byDate = (a: { created_at: string }, b: { created_at: string }) => a.created_at.localeCompare(b.created_at);
   return {
     sales: journal.map((row) => row.sale).filter(isSale).sort(byDate),
     movements: movements.filter(isLocalMovement),
     refunds: refunds.map((row) => row.refund).filter(isRefund).sort(byDate),
+    payments: payments.filter(isLocalCustomerPayment).sort(byDate),
   };
 }
 
@@ -79,9 +83,10 @@ export async function pruneOldSessions(now = new Date()): Promise<void> {
   const pending = new Set((await db.outbox.toArray()).filter(isOutboxItem).map(itemSession));
   const ids = sessionsToPrune(sessions, now, pending);
   if (ids.length === 0) return;
-  await db.transaction('rw', [db.cash_sessions, db.cash_movements, db.journal, db.refunds], async () => {
+  await db.transaction('rw', [db.cash_sessions, db.cash_movements, db.journal, db.refunds, db.customer_payments], async () => {
     await db.journal.where('session_id').anyOf(ids).delete();
     await db.refunds.where('session_id').anyOf(ids).delete();
+    await db.customer_payments.where('session_id').anyOf(ids).delete();
     await db.cash_movements.where('session_id').anyOf(ids).delete();
     await db.cash_sessions.bulkDelete(ids);
   });
@@ -115,7 +120,9 @@ export async function unknownServerSession(registerId: string): Promise<CashSess
 
 /** Rapport 80 mm d'une session, avec ce qui est enregistré sur la caisse à cet instant (et ce qui reste à envoyer). */
 export async function sessionReceipt(session: LocalCashSession, registerName: string, store: StoreInfo): Promise<SessionReceipt> {
-  const [{ sales, movements, refunds }, outbox] = await Promise.all([cashSessionData(session.id), db.outbox.toArray()]);
+  const [{ sales, movements, refunds, payments }, outbox] = await Promise.all([cashSessionData(session.id), db.outbox.toArray()]);
   const pending = outbox.filter(isOutboxItem).filter((item) => itemSession(item) === session.id).length;
-  return buildSessionReceipt({ session, sales, movements, refunds, registerName, printedAt: new Date(), store, timeZone: TIME_ZONE, pending });
+  return buildSessionReceipt({
+    session, sales, movements, refunds, payments, registerName, printedAt: new Date(), store, timeZone: TIME_ZONE, pending,
+  });
 }

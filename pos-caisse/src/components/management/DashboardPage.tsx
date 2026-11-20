@@ -66,7 +66,7 @@ export function DashboardPage({ data, onNavigate }: PageProps) {
 
   const open = data.sessions.find((s) => s.status === 'open') ?? null;
   const openRow = open
-    ? sessionRows([open], data.receipts.map((r) => r.sale), data.refunds, data.movements)[0]
+    ? sessionRows([open], data.receipts.map((r) => r.sale), data.refunds, data.movements, data.payments)[0]
     : null;
   const out = data.products.filter((p) => stockStatus(p) === 'out').length;
   const low = data.products.filter((p) => stockStatus(p) === 'low').length;

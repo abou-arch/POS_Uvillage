@@ -26,7 +26,7 @@ function compute(data: ManagementData, period: Period) {
     vat: vatSummary(sales, refunds),
     methods: byMethod(sales, refunds),
     products: byProduct(sales, refunds),
-    sessions: sessionRows(sessions, data.receipts.map((r) => r.sale), data.refunds, data.movements),
+    sessions: sessionRows(sessions, data.receipts.map((r) => r.sale), data.refunds, data.movements, data.payments),
   };
 }
 type Report = ReturnType<typeof compute>;

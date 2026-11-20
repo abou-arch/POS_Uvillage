@@ -1,7 +1,7 @@
 // Client HTTP de la caisse. Seul fichier à modifier pour pointer vers la vraie API (VITE_API_URL).
 import type {
-  Auth, Brand, CashMovement, CashSession, CashSessionClosing, CashSessionOpening, Category, Customer, Product, Refund, Sale,
-  SaleLookup,
+  Auth, Brand, CashMovement, CashSession, CashSessionClosing, CashSessionOpening, Category, Customer, CustomerPayment, Product,
+  Refund, Sale, SaleLookup,
 } from '../types';
 
 const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:4000/api';
@@ -83,6 +83,16 @@ export const api = {
     request<{ id: string; status: string; stock_warning: boolean }>('/sales', { method: 'POST', body: JSON.stringify(sale) }),
   syncSales: (sales: Sale[]) =>
     request<{ results: { id: string; status: string }[] }>('/sales/batch', { method: 'POST', body: JSON.stringify({ sales }) }),
+  // Annulation d'une vente (§5) ; approved_by : le responsable qui l'a autorisée pour un caissier (§11, contrat 0.8).
+  cancelSale: (saleId: string, approvedBy: string | null) =>
+    request<{ id: string; status: string }>(`/sales/${encodeURIComponent(saleId)}/cancel`, {
+      method: 'POST', body: JSON.stringify({ approved_by: approvedBy }),
+    }),
+  // Règlement d'une dette (§4, contrat 0.8)
+  createCustomerPayment: (payment: CustomerPayment) =>
+    request<{ id: string; status: string; balance?: number; session_closed?: boolean; balance_exceeded?: boolean }>(
+      '/customer-payments', { method: 'POST', body: JSON.stringify(payment) },
+    ),
   // Retours (§5 et §10)
   saleByNumber: (number: string) => request<SaleLookup>(`/sales/by-number/${encodeURIComponent(number)}`),
   createRefund: (refund: Refund) =>

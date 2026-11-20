@@ -1,4 +1,4 @@
-// Routes de la caisse (contrat 0.7) sur la vraie base.
+// Routes de la caisse (contrat 0.7, plus 0.8 proposé) sur la vraie base.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { after, before, describe, test } from 'node:test';
@@ -201,8 +201,8 @@ describe('ventes, retours et sessions', () => {
     const s = sale({ session, lines: [line(P1, 4)] });
     await as.post('/sales', s);
     const stock = await stockOf(as, 'st_1', 'p_1');
-    const cashier = await srv.login('caissier');
-    assert.equal((await cashier.post(`/sales/${s.id}/cancel`)).status, 403);
+    const cashier = await srv.login('caissier'); // rattaché au seul magasin st_2
+    assert.equal((await cashier.post(`/sales/${s.id}/cancel`)).status, 404);
     assert.deepEqual((await as.post(`/sales/${s.id}/cancel`)).body, { id: s.id, status: 'cancelled' });
     assert.equal(await stockOf(as, 'st_1', 'p_1'), stock + 4);
     assert.equal((await as.get(`/sales/by-number/${s.number}`)).body.sale.status, 'cancelled');
@@ -240,5 +240,63 @@ describe('ventes, retours et sessions', () => {
   test('vente arrivée après la clôture : acceptée et signalée', async () => {
     const s = sale({ session, lines: [line(P1, 1)] });
     assert.equal((await as.post('/sales', s)).body.session_closed, true);
+  });
+});
+
+describe('caissier (0.8) : annulation autorisée, règlement d’une dette', () => {
+  let cashier;
+  let session;
+  const expected = () => expectedByMethod(srv.db, srv.db.prepare('SELECT * FROM cash_sessions WHERE id = ?').get(session.id));
+  const payment = (over = {}) => ({
+    id: randomUUID(), store_id: 'st_2', register_id: 'reg_3', session_id: session.id, customer_id: 'c_1', method: 'cash',
+    amount: 400, note: null, created_by: 'u_2', created_at: new Date().toISOString(), ...over,
+  });
+  before(async () => {
+    cashier = await srv.login('caissier');
+    session = sessionBody('st_2', 'reg_3', 'u_2', 10000);
+    assert.equal((await cashier.post('/cash-sessions', session)).status, 201);
+  });
+
+  test('annulation par un caissier : refusée sans l’accord d’un responsable du magasin', async () => {
+    const s = sale({ session, lines: [line(P1, 2)], cashier_id: 'u_2' });
+    assert.equal((await cashier.post('/sales', s)).status, 201);
+    const stock = await stockOf(cashier, 'st_2', 'p_1');
+    const cash = expected().cash;
+    assert.equal((await cashier.post(`/sales/${s.id}/cancel`)).status, 403);
+    assert.equal((await cashier.post(`/sales/${s.id}/cancel`, { approved_by: 'u_2' })).status, 403); // pas un responsable
+    assert.deepEqual((await cashier.post(`/sales/${s.id}/cancel`, { approved_by: 'u_3' })).body, { id: s.id, status: 'cancelled' });
+    assert.deepEqual((await cashier.post(`/sales/${s.id}/cancel`, { approved_by: 'u_3' })).body, { id: s.id, status: 'cancelled' });
+    assert.equal(srv.db.prepare('SELECT cancel_approved_by FROM sales WHERE id = ?').get(s.id).cancel_approved_by, 'u_3');
+    assert.equal(await stockOf(cashier, 'st_2', 'p_1'), stock + 2);
+    assert.equal(expected().cash, cash - 300); // la vente annulée ne compte plus dans les espèces attendues
+  });
+
+  test('reste dû dans la recherche ; règlement compté dans la session, idempotent', async () => {
+    const s = sale({ session, lines: [line(P1, 10)], customer_id: 'c_1', cashier_id: 'u_2', payments: [{ method: 'credit', amount: 1500 }] });
+    assert.equal((await cashier.post('/sales', s)).status, 201);
+    const before = (await cashier.get('/customers?search=ahmed')).body[0].balance;
+    const cash = expected().cash;
+    const p = payment();
+    const res = await cashier.post('/customer-payments', p);
+    assert.equal(res.status, 201);
+    assert.deepEqual(res.body, { id: p.id, status: 'created', balance: before - 400, session_closed: false, balance_exceeded: false });
+    assert.equal((await cashier.post('/customer-payments', p)).body.status, 'duplicate');
+    assert.equal((await cashier.get('/customers?search=ahmed')).body[0].balance, before - 400);
+    assert.equal(expected().cash, cash + 400);
+    const card = await cashier.post('/customer-payments', payment({ method: 'card', amount: 100 }));
+    assert.equal(card.status, 201);
+    assert.equal(expected().card, 100);
+  });
+
+  test('règlement fait hors ligne au-delà du reste dû : accepté et signalé ; règlement invalide refusé', async () => {
+    const res = await cashier.post('/customer-payments', payment({ amount: 1_000_000 }));
+    assert.equal(res.status, 201);
+    assert.equal(res.body.balance_exceeded, true);
+    assert.equal((await cashier.post('/customer-payments', payment({ method: 'credit' }))).status, 400);
+    assert.equal((await cashier.post('/customer-payments', payment({ amount: 0 }))).status, 400);
+    assert.equal((await cashier.post('/customer-payments', payment({ customer_id: 'c_inconnu' }))).status, 404);
+    assert.equal((await cashier.post('/customer-payments', payment({ store_id: 'st_1', register_id: 'reg_1' }))).status, 403);
+    const unknown = await cashier.post('/customer-payments', payment({ session_id: randomUUID() }));
+    assert.equal(unknown.body.error.code, 'SESSION_UNKNOWN');
   });
 });

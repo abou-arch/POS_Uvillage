@@ -4,8 +4,8 @@ import { METHOD_LABELS } from '../state/payment';
 import { closingNeedsApproval } from '../state/permissions';
 import { isApproval, isCents, isDate, isUuid } from '../state/sales';
 import type {
-  CashCountLine, CashMovement, CashMovementType, CashSession, CashSessionClosing, CashSessionOpening, CountedMethod, MethodCount,
-  Payment, PaymentMethod, Refund, Role, Sale,
+  CashCountLine, CashMovement, CashMovementType, CashSession, CashSessionClosing, CashSessionOpening, CountedMethod, CustomerPayment,
+  MethodCount, Payment, PaymentMethod, Refund, Role, Sale,
 } from '../types';
 import { isId, isRecord } from './storage';
 import { formatMad, vatBreakdownOfLines, type Totals, type VatGroup } from './totals.js';
@@ -52,17 +52,28 @@ export function movementTotals(movements: Pick<CashMovement, 'type' | 'amount'>[
   return totals;
 }
 
+/** Une vente de la session : son statut (annulée ou non) décide si elle compte. */
+export type SessionSale = Pick<Sale, 'payments'> & Partial<Pick<Sale, 'status'>>;
+/** Un règlement de dette de la session (contrat 0.8). */
+export type SessionPayment = Pick<CustomerPayment, 'method' | 'amount'>;
+
+/** Ventes qui comptent : une vente annulée a été rendue au client (§5, contrat 0.8). */
+export const countedSales = <T extends SessionSale>(sales: T[]) => sales.filter((s) => s.status !== 'cancelled');
+
+const paidWith = (payments: { method: PaymentMethod; amount: number }[], method: PaymentMethod) =>
+  payments.filter((p) => p.method === method).reduce((s, p) => s + p.amount, 0);
+
 /**
- * Espèces attendues (§9) = fond de caisse + espèces des ventes − espèces rendues par les retours + entrées − sorties.
- * Un retour compte dans la session où il est fait (§9).
+ * Espèces attendues (§9) = fond de caisse + espèces des ventes non annulées − espèces rendues par les retours
+ * + règlements de dettes en espèces + entrées − sorties. Un retour compte dans la session où il est fait (§9).
  */
 export function expectedCash(
-  openingCash: number, sales: Pick<Sale, 'payments'>[], movements: Pick<CashMovement, 'type' | 'amount'>[],
-  refunds: Pick<Refund, 'payments'>[] = [],
+  openingCash: number, sales: SessionSale[], movements: Pick<CashMovement, 'type' | 'amount'>[],
+  refunds: Pick<Refund, 'payments'>[] = [], payments: SessionPayment[] = [],
 ): number {
   const moves = movementTotals(movements);
-  return openingCash + sales.reduce((s, sale) => s + cashOfSale(sale), 0) - refunds.reduce((s, r) => s + cashOfSale(r), 0)
-    + moves.in - moves.out;
+  return openingCash + countedSales(sales).reduce((s, sale) => s + cashOfSale(sale), 0) - refunds.reduce((s, r) => s + cashOfSale(r), 0)
+    + paidWith(payments, 'cash') + moves.in - moves.out;
 }
 
 /** Moyens de paiement comptés à la clôture, dans l'ordre du tableau et du rapport. Le crédit n'en fait pas partie. */
@@ -71,17 +82,18 @@ export const COUNTED_METHODS: CountedMethod[] = ['cash', 'card', 'mobile'];
 export type Expected = Record<CountedMethod, number>;
 
 /**
- * Montants attendus à la clôture (§9) : espèces comme ci-dessus ; carte et mobile = paiements des ventes moins
- * remboursements des retours de la session. Carte et mobile peuvent être négatifs (plus de remboursements que de ventes).
+ * Montants attendus à la clôture (§9) : espèces comme ci-dessus ; carte et mobile = paiements des ventes non annulées
+ * − remboursements des retours + règlements de dettes de la session. Carte et mobile peuvent être négatifs (plus de
+ * remboursements que de ventes).
  */
 export function expectedByMethod(
-  openingCash: number, sales: Pick<Sale, 'payments'>[], movements: Pick<CashMovement, 'type' | 'amount'>[],
-  refunds: Pick<Refund, 'payments'>[] = [],
+  openingCash: number, sales: SessionSale[], movements: Pick<CashMovement, 'type' | 'amount'>[],
+  refunds: Pick<Refund, 'payments'>[] = [], payments: SessionPayment[] = [],
 ): Expected {
   const total = (docs: { payments: Payment[] }[], method: PaymentMethod) =>
-    docs.reduce((s, d) => s + d.payments.filter((p) => p.method === method).reduce((n, p) => n + p.amount, 0), 0);
-  const net = (method: PaymentMethod) => total(sales, method) - total(refunds, method);
-  return { cash: expectedCash(openingCash, sales, movements, refunds), card: net('card'), mobile: net('mobile') };
+    docs.reduce((s, d) => s + paidWith(d.payments, method), 0);
+  const net = (method: PaymentMethod) => total(countedSales(sales), method) - total(refunds, method) + paidWith(payments, method);
+  return { cash: expectedCash(openingCash, sales, movements, refunds, payments), card: net('card'), mobile: net('mobile') };
 }
 
 // --- Comptage des espèces par billets et pièces ---------------------------------------------------------
@@ -303,8 +315,14 @@ export const isLocalMovement = (v: unknown): v is LocalCashMovement =>
 export const METHODS: PaymentMethod[] = ['cash', 'card', 'mobile', 'credit'];
 
 export interface SessionReport {
-  salesCount: number;
-  totals: Totals; // somme des totaux des ventes enregistrées
+  salesCount: number; // ventes non annulées
+  totals: Totals; // somme des totaux des ventes enregistrées, sans les ventes annulées
+  cancelledCount: number; // ventes annulées dans la session (contrat 0.8)
+  cancelledTotal: number; // TTC des ventes annulées
+  paymentsCount: number; // règlements de dettes (contrat 0.8)
+  paymentsTotal: number;
+  paymentsByMethod: { method: CountedMethod; amount: number }[]; // espèces, carte, mobile
+  cashPayments: number; // règlements en espèces
   byMethod: { method: PaymentMethod; amount: number }[]; // les 4 moyens, toujours dans le même ordre
   vat: VatGroup[]; // HT / TVA par taux, le plus élevé d'abord
   cashSales: number; // espèces des ventes (nettes du rendu)
@@ -321,14 +339,18 @@ export interface SessionReport {
 
 /**
  * Rapport d'une session, à partir des ventes et mouvements ENREGISTRÉS (comme le ticket : jamais un recalcul
- * depuis un panier). La TVA par taux reprend la règle du §7, vente par vente, via totals.js.
+ * depuis un panier). La TVA par taux reprend la règle du §7, vente par vente, via totals.js. Les ventes annulées ne
+ * comptent ni dans le chiffre ni dans la TVA : elles sont seulement comptées à part.
  */
 export function sessionReport(
   session: Pick<CashSession, 'opening_cash' | 'counts'>,
-  sales: Sale[],
+  allSales: Sale[],
   movements: Pick<CashMovement, 'type' | 'amount'>[],
   refunds: Pick<Refund, 'payments' | 'totals'>[] = [],
+  payments: SessionPayment[] = [],
 ): SessionReport {
+  const sales = countedSales(allSales);
+  const cancelled = allSales.filter((s) => s.status === 'cancelled');
   const totals = { ht: 0, tva: 0, ttc: 0 };
   const byMethod = new Map<PaymentMethod, number>(METHODS.map((m) => [m, 0]));
   const vat = new Map<number, VatGroup>();
@@ -348,6 +370,12 @@ export function sessionReport(
   return {
     salesCount: sales.length,
     totals,
+    cancelledCount: cancelled.length,
+    cancelledTotal: cancelled.reduce((s, x) => s + x.totals.ttc, 0),
+    paymentsCount: payments.length,
+    paymentsTotal: payments.reduce((s, p) => s + p.amount, 0),
+    paymentsByMethod: COUNTED_METHODS.map((method) => ({ method, amount: paidWith(payments, method) })),
+    cashPayments: paidWith(payments, 'cash'),
     byMethod: METHODS.map((method) => ({ method, amount: byMethod.get(method) ?? 0 })),
     vat: [...vat.values()].sort((a, b) => b.rate - a.rate),
     cashSales: byMethod.get('cash') ?? 0,
@@ -358,7 +386,7 @@ export function sessionReport(
     cashIn: moves.in,
     cashOut: moves.out,
     openingCash: session.opening_cash,
-    expected: expectedByMethod(session.opening_cash, sales, movements, refunds),
+    expected: expectedByMethod(session.opening_cash, sales, movements, refunds, payments),
     counts: session.counts,
   };
 }

@@ -1,12 +1,13 @@
 // Impression 80 mm : un seul document à la fois (ticket de vente, ticket de retour, ticket d'entrée / sortie d'espèces,
-// ou rapport de session X ou de clôture).
+// reçu d'un règlement de dette, ou rapport de session X ou de clôture).
 import { useCallback, useEffect, useState } from 'react';
-import type { MovementReceipt, Receipt, RefundReceipt, SessionReceipt } from '../lib/receipt';
+import type { MovementReceipt, PaymentReceipt, Receipt, RefundReceipt, SessionReceipt } from '../lib/receipt';
 
 export type PrintDoc =
   | { kind: 'sale'; receipt: Receipt; copy: boolean }
   | { kind: 'refund'; receipt: RefundReceipt }
   | { kind: 'movement'; receipt: MovementReceipt }
+  | { kind: 'payment'; receipt: PaymentReceipt }
   | { kind: 'session'; report: SessionReceipt };
 
 /** L'impression part après le rendu, pour que la feuille imprimée soit bien celle qui vient d'être demandée. */

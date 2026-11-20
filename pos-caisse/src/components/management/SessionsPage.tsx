@@ -20,7 +20,7 @@ export function SessionsPage({ session, data, print }: PageProps) {
   const { storeName, registerName } = placeOf(session);
   const threshold = closingThreshold(session);
   const rows = useMemo(
-    () => sessionRows(data.sessions, data.receipts.map((r) => r.sale), data.refunds, data.movements),
+    () => sessionRows(data.sessions, data.receipts.map((r) => r.sale), data.refunds, data.movements, data.payments),
     [data],
   );
   const closed = rows.filter((r) => r.difference !== null);

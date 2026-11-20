@@ -6,15 +6,19 @@ import { cachedProducts } from '../db/catalog';
 import { cashSessionData, closeCashSession, recordCashMovement, sessionReceipt } from '../db/cashSessions';
 import { db } from '../db/db';
 import { legacyUnreadable } from '../db/migrate';
-import { recordRefund, recordSale, SessionNotOpenError } from '../db/outbox';
+import { recordCancel, recordCustomerPayment, recordRefund, recordSale, SessionNotOpenError } from '../db/outbox';
 import { useLiveQuery } from '../db/useLiveQuery';
 import { buildRefund, mergeRefunds, RefundError } from '../lib/buildRefund';
 import { buildSale, type SaleInput } from '../lib/buildSale';
+import { cancelBlocker, cancelGiveBack, CancelError } from '../lib/cancelSale';
 import {
-  buildClosing, buildMovement, closeBlocker, expectedByMethod, methodCounts, overThreshold, type Counted, type LocalCashMovement,
-  type LocalCashSession,
+  buildClosing, buildMovement, closeBlocker, countedSales, expectedByMethod, methodCounts, overThreshold, type Counted,
+  type LocalCashMovement, type LocalCashSession,
 } from '../lib/cashSession';
-import { buildMovementReceipt, buildReceipt, buildRefundReceipt, type ReceiptData, type RefundReceiptData } from '../lib/receipt';
+import { buildCustomerPayment, type LocalCustomerPayment } from '../lib/customerPayment';
+import {
+  buildMovementReceipt, buildPaymentReceipt, buildReceipt, buildRefundReceipt, type ReceiptData, type RefundReceiptData,
+} from '../lib/receipt';
 import { formatMad, saleTotals } from '../lib/totals.js';
 import { METHOD_LABELS } from '../state/payment';
 import { uuidv4 } from '../lib/uuid';
@@ -31,6 +35,9 @@ import { usePrint } from '../state/usePrint';
 import type { SyncState } from '../sync/useSync';
 import type { Approver, CashCountLine, CashMovementType, Payment, Product, Sale, Session } from '../types';
 import { ApprovalModal } from './ApprovalModal';
+import { CancelSaleModal } from './CancelSaleModal';
+import { CustomerPaymentModal, type PaymentChoice } from './CustomerPaymentModal';
+import type { SaleRequest } from './management/shared';
 import { Cart } from './Cart';
 import { CashMovementModal } from './CashMovementModal';
 import { CloseSessionModal } from './CloseSessionModal';
@@ -54,11 +61,12 @@ interface ApprovalRequest { action: GuardedAction; detail: string | null; resolv
 
 const storageMessage = (e: unknown, otherwise: string) => (e instanceof SessionNotOpenError ? e.message : otherwise);
 
-export function PosScreen({ session, cashSession, sync, unreadableSessions, onClosed, onLogout }: {
+export function PosScreen({ session, cashSession, sync, unreadableSessions, request = null, onClosed, onLogout }: {
   session: Session;
   cashSession: LocalCashSession;
   sync: SyncState;
   unreadableSessions: number;
+  request?: SaleRequest | null; // retour ou annulation demandés depuis la Gestion
   onClosed: (sessionId: string) => void;
   onLogout: () => void;
 }) {
@@ -71,6 +79,19 @@ export function PosScreen({ session, cashSession, sync, unreadableSessions, onCl
   const [refunding, setRefunding] = useState<string | null>(null); // numéro du ticket à retourner ('' : à taper)
   const [showTickets, setShowTickets] = useState(false);
   const [refundDone, setRefundDone] = useState<RefundReceiptData | null>(null); // dernier retour : message et réimpression
+  const [cancelling, setCancelling] = useState<ReceiptData | null>(null); // vente dont l'annulation est demandée
+  const [cancelDone, setCancelDone] = useState<ReceiptData | null>(null); // dernière vente annulée : ce qu'on rend
+  const [paying, setPaying] = useState(false); // fenêtre du règlement d'un client
+  const [paymentDone, setPaymentDone] = useState<LocalCustomerPayment | null>(null); // dernier règlement : reçu
+  // Demande venue de la Gestion : traitée une fois. Celle qui existait déjà au montage (session précédente) est ignorée.
+  const [seenRequest, setSeenRequest] = useState(request);
+  if (request && request !== seenRequest) {
+    setSeenRequest(request);
+    setRefundDone(null);
+    setCancelDone(null);
+    if (request.kind === 'refund') setRefunding(request.data.sale.number);
+    else setCancelling(request.data);
+  }
   const held = useHeldSales(session.registerId);
   const [receipt, setReceipt] = useState(() => loadLastReceipt(session.registerId));
   const { doc, print } = usePrint();
@@ -109,9 +130,12 @@ export function PosScreen({ session, cashSession, sync, unreadableSessions, onCl
   const categories = useLiveQuery(() => db.categories.toArray(), [], []).value;
   const brands = useLiveQuery(() => db.brands.toArray(), [], []).value;
   // Ventes et mouvements de la session, relus à chaque changement : l'attendu est toujours à jour.
-  const sessionData = useLiveQuery(() => cashSessionData(cashSession.id), [cashSession.id], { sales: [], movements: [], refunds: [] });
-  const { sales, movements, refunds } = sessionData.value;
-  const expected = expectedByMethod(cashSession.opening_cash, sales, movements, refunds);
+  const sessionData = useLiveQuery(
+    () => cashSessionData(cashSession.id), [cashSession.id], { sales: [], movements: [], refunds: [], payments: [] },
+  );
+  const { sales, movements, refunds, payments } = sessionData.value;
+  const expected = expectedByMethod(cashSession.opening_cash, sales, movements, refunds, payments);
+  const counted = countedSales(sales); // les ventes annulées ne comptent pas (§5)
   const sessionReady = sessionData.loaded && sessionData.error === null; // l’attendu n’est juste qu’une fois tout relu
 
   const { storeName, registerName } = placeOf(session);
@@ -122,6 +146,8 @@ export function PosScreen({ session, cashSession, sync, unreadableSessions, onCl
     print({ kind: 'refund', receipt: buildRefundReceipt(data, store, TIME_ZONE, copy) });
   const printMovement = (movement: LocalCashMovement, copy: boolean) =>
     print({ kind: 'movement', receipt: buildMovementReceipt({ movement, registerName, store, timeZone: TIME_ZONE, copy }) });
+  const printPayment = (payment: LocalCustomerPayment, copy: boolean) =>
+    print({ kind: 'payment', receipt: buildPaymentReceipt({ payment, registerName, store, timeZone: TIME_ZONE, copy }) });
 
   /** « Plafond 10 % et 50,00 DH · OEUF, remise globale » : ce que le responsable autorise. */
   function discountDetail(): string {
@@ -278,6 +304,71 @@ export function PosScreen({ session, cashSession, sync, unreadableSessions, onCl
     return null;
   }
 
+  // --- Annulation d'une vente de la session (§5, contrat 0.8) -----------------------------------------------
+
+  function closeCancel() {
+    setCancelling(null);
+    document.getElementById('scan')?.focus();
+  }
+
+  // Le caissier rend l'argent au client ; la vente est marquée annulée sur la caisse et l'annulation part dans la file,
+  // après la vente. Un caissier fait autoriser chaque annulation par un responsable (§11).
+  async function saveCancel(): Promise<string | null> {
+    if (!cancelling) return null;
+    const { sale } = cancelling;
+    const approval = await authorize('cancel_sale', `Ticket ${sale.number} · ${formatMad(sale.totals.ttc)} à rendre`);
+    if (!approval) return 'Annulation non autorisée : rien n’est enregistré.';
+    let row;
+    try {
+      row = await recordCancel(sale.id, session.registerId, approval.approvedBy, expected.cash);
+    } catch (e) {
+      if (e instanceof CancelError || e instanceof SessionNotOpenError) return e.message;
+      return 'Stockage local indisponible : la vente n’est pas annulée.';
+    }
+    sync.sync();
+    const data = { sale: row.sale, cashier: row.cashier, customer: row.customer };
+    if (receipt?.sale.id === sale.id) { // « Réimprimer » sort désormais le ticket marqué annulé
+      saveLastReceipt(session.registerId, data);
+      setReceipt(data);
+    }
+    if (lastSale?.id === sale.id) setLastSale(null);
+    setRefundDone(null);
+    setCancelDone(data);
+    closeCancel();
+    return null;
+  }
+
+  // --- Règlement d'une dette (§4, contrat 0.8) ----------------------------------------------------------
+
+  function closePayment() {
+    setPaying(false);
+    document.getElementById('scan')?.focus();
+  }
+
+  // L'argent entre dans la caisse : le règlement est écrit sur la caisse et dans la file, puis le reçu est imprimé.
+  async function savePayment(choice: PaymentChoice): Promise<string | null> {
+    let payment;
+    try {
+      payment = buildCustomerPayment({
+        id: uuidv4(), storeId: session.storeId, registerId: session.registerId, sessionId: cashSession.id, customerId: choice.customer.id,
+        method: choice.method, amount: choice.amount, balance: choice.balance, note: choice.note, createdBy: session.user.id, now: new Date(),
+      });
+    } catch (e) {
+      return e instanceof Error ? e.message : 'Règlement invalide.'; // saisie refusée (montant, reste dû)
+    }
+    let saved;
+    try {
+      saved = await recordCustomerPayment(payment, { customer: choice.customer.name, cashier: session.user.name }, choice.balance);
+    } catch (e) {
+      return storageMessage(e, 'Stockage local indisponible : le règlement n’est pas enregistré.');
+    }
+    sync.sync();
+    setPaymentDone(saved);
+    closePayment();
+    if (AUTO_PRINT) printPayment(saved, false); // le reçu remis au client
+    return null;
+  }
+
   // --- Session de caisse -------------------------------------------------------------------------------
 
   function closeSessionView() {
@@ -354,8 +445,13 @@ export function PosScreen({ session, cashSession, sync, unreadableSessions, onCl
           aria-label="Retour d’articles et remboursement" title="Retour d’articles : retrouver le ticket, rembourser">
           <Icon name="swap" size={18} /><span className="label">Retour</span>
         </button>
+        <button className="held-button" disabled={!sessionReady} onClick={() => { setPaymentDone(null); setPaying(true); }}
+          aria-label="Règlement d’un client : payer ce qu’il doit" title="Règlement d’un client qui a acheté à crédit">
+          <Icon name="users" size={18} /><span className="label">Règlement</span>
+        </button>
         <button className="held-button" disabled={!sessionReady} onClick={() => setShowTickets(true)}
-          aria-label="Tickets de la session : rechercher, réimprimer, retour" title="Tickets de la session : rechercher, réimprimer, retour">
+          aria-label="Tickets de la session : rechercher, réimprimer, retour, annulation"
+          title="Tickets de la session : rechercher, réimprimer, retour, annulation">
           <Icon name="receipt" size={18} /><span className="label">Tickets</span>
         </button>
         <button className="held-button" disabled={!sessionReady} onClick={() => setSessionView('menu')}
@@ -394,6 +490,25 @@ export function PosScreen({ session, cashSession, sync, unreadableSessions, onCl
           <button type="button" className="link" onClick={() => setRefundDone(null)}>Fermer</button>
         </p>
       )}
+      {cancelDone && (
+        <p className="banner notice" role="status">
+          <Icon name="check" size={18} />
+          Vente {cancelDone.sale.number} annulée, articles remis en stock. À rendre au client :{' '}
+          {cancelGiveBack(cancelDone.sale.payments).filter((g) => g.method !== 'credit')
+            .map((g) => `${METHOD_LABELS[g.method].toLowerCase()} ${formatMad(g.amount)}`).join(', ') || 'rien (vente à crédit, dette effacée)'}.
+          <button type="button" className="link" onClick={() => printSale(cancelDone, false)}>Imprimer le ticket annulé</button>
+          <button type="button" className="link" onClick={() => setCancelDone(null)}>Fermer</button>
+        </p>
+      )}
+      {paymentDone && (
+        <p className="banner notice" role="status">
+          <Icon name="check" size={18} />
+          Règlement de {paymentDone.customer_name} enregistré : {formatMad(paymentDone.amount)} en {METHOD_LABELS[paymentDone.method].toLowerCase()}
+          {paymentDone.balance_before !== null ? `, reste dû ${formatMad(Math.max(paymentDone.balance_before - paymentDone.amount, 0))}` : ''}.
+          <button type="button" className="link" onClick={() => printPayment(paymentDone, true)}>Réimprimer le reçu</button>
+          <button type="button" className="link" onClick={() => setPaymentDone(null)}>Fermer</button>
+        </p>
+      )}
       {(sync.storageError || !held.saved) && (
         <p className="banner">
           <Icon name="alert" size={18} />Base locale indisponible : la caisse ne peut ni vendre hors ligne ni garder de vente en attente.
@@ -420,8 +535,9 @@ export function PosScreen({ session, cashSession, sync, unreadableSessions, onCl
           onClose={() => { setShowHeld(false); document.getElementById('scan')?.focus(); }} />
       )}
       {sessionReady && sessionView === 'menu' && (
-        <SessionModal session={cashSession} salesCount={sales.length} salesTotal={sales.reduce((n, s) => n + s.totals.ttc, 0)}
+        <SessionModal session={cashSession} salesCount={counted.length} salesTotal={counted.reduce((n, s) => n + s.totals.ttc, 0)}
           refundsCount={refunds.length} refundsTotal={refunds.reduce((n, r) => n + r.totals.ttc, 0)}
+          paymentsCount={payments.length} paymentsTotal={payments.reduce((n, p) => n + p.amount, 0)}
           expected={expected} movements={movements} onMovement={() => setSessionView('movement')}
           onReprintMovement={(m) => printMovement(m, true)} onReport={() => void printReportX()}
           onCloseSession={() => setSessionView('close')} onClose={closeSessionView} />
@@ -436,12 +552,18 @@ export function PosScreen({ session, cashSession, sync, unreadableSessions, onCl
       {sessionReady && showTickets && (
         <TicketsModal sessionId={cashSession.id} outbox={sync.outbox} refunds={refunds} onReprint={(data) => printSale(data, true)}
           onRefund={(number) => { setShowTickets(false); setRefundDone(null); setRefunding(number); }}
+          onCancel={(data) => { setShowTickets(false); setCancelDone(null); setCancelling(data); }}
           onClose={() => { setShowTickets(false); document.getElementById('scan')?.focus(); }} />
       )}
       {sessionReady && refunding !== null && (
         <RefundModal storeId={session.storeId} initialNumber={refunding} cashAvailable={expected.cash} onSave={saveRefund}
           onClose={() => { setRefunding(null); document.getElementById('scan')?.focus(); }} />
       )}
+      {sessionReady && cancelling && (
+        <CancelSaleModal data={cancelling} blocker={cancelBlocker(cancelling.sale, cashSession.id, refunds, expected.cash)}
+          onConfirm={saveCancel} onClose={closeCancel} />
+      )}
+      {sessionReady && paying && <CustomerPaymentModal onSave={savePayment} onClose={closePayment} />}
       {approval && (
         <ApprovalModal action={approval.action} detail={approval.detail} approvers={approvers.list}
           onApproved={(a) => approval.resolve(a)} onCancel={() => approval.resolve(null)} />

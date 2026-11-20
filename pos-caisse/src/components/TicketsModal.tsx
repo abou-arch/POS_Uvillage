@@ -11,13 +11,15 @@ import { Modal } from './Modal';
 import { Icon } from './ui';
 
 // Tickets de la session en cours (étape 6e) : retrouver une vente par son numéro ou son client, la réimprimer
-// (duplicata), ou ouvrir son retour. Les ventes viennent du journal de ce poste : elles s'affichent hors ligne.
-export function TicketsModal({ sessionId, outbox, refunds, onReprint, onRefund, onClose }: {
+// (duplicata), ouvrir son retour, ou l'annuler (contrat 0.8). Les ventes viennent du journal de ce poste : elles
+// s'affichent hors ligne.
+export function TicketsModal({ sessionId, outbox, refunds, onReprint, onRefund, onCancel, onClose }: {
   sessionId: string;
   outbox: OutboxItem[]; // état d'envoi de chaque vente
   refunds: Refund[]; // retours de la session : montant déjà rendu
   onReprint: (data: ReceiptData) => void;
   onRefund: (saleNumber: string) => void;
+  onCancel: (data: ReceiptData) => void;
   onClose: () => void;
 }) {
   const [query, setQuery] = useState('');
@@ -59,6 +61,11 @@ export function TicketsModal({ sessionId, outbox, refunds, onReprint, onRefund, 
                   <button type="button" className="btn secondary" disabled={data.sale.status === 'cancelled'}
                     onClick={() => onRefund(data.sale.number)} aria-label={`Retour sur le ticket ${data.sale.number}`}>
                     <Icon name="swap" size={18} />Retour
+                  </button>
+                  <button type="button" className="btn secondary danger-text" disabled={data.sale.status === 'cancelled' || refunded > 0}
+                    title={refunded > 0 ? 'Cette vente a déjà un retour : elle ne peut plus être annulée' : 'Annuler la vente : tout est rendu au client'}
+                    onClick={() => onCancel(data)} aria-label={`Annuler la vente ${data.sale.number}`}>
+                    <Icon name="x" size={18} />Annuler
                   </button>
                 </div>
               </li>

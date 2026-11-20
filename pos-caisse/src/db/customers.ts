@@ -26,7 +26,9 @@ export async function searchCustomers(search: string): Promise<{ list: Customer[
     return { list, offline: false };
   } catch {
     const cached = await db.customers.toArray().catch(() => [] as Customer[]);
-    return { list: cached.filter((c) => matchesCustomer(c, search)), offline: true };
+    // Le reste dû gardé en cache date de la dernière recherche en ligne : hors ligne, il n'est pas montré.
+    const list = cached.filter((c) => matchesCustomer(c, search)).map(({ balance: _stale, ...c }) => c);
+    return { list, offline: true };
   }
 }
 

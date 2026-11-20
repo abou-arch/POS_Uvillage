@@ -17,7 +17,7 @@ export function CustomersPage({ session, data }: PageProps) {
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [open, setOpen] = useState<CustomerRow | null>(null);
-  const rows = useMemo(() => customerRows(data.receipts, data.refunds), [data.receipts, data.refunds]);
+  const rows = useMemo(() => customerRows(data.receipts, data.refunds, data.payments), [data.receipts, data.refunds, data.payments]);
   const withCredit = rows.filter((r) => r.credit > 0);
   const q = fold(query);
   const list = (filter === 'credit' ? withCredit : rows).filter((r) => !q || fold(r.name).includes(q));

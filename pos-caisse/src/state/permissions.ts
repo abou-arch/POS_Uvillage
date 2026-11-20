@@ -5,7 +5,7 @@ import type { MethodCount, Role } from '../types';
 import { lineGross, type CartState } from './cart';
 
 /** Opérations qu'un caissier fait autoriser par un responsable (§11). */
-export type GuardedAction = 'discount' | 'refund' | 'cash_out' | 'closing' | 'delete_held';
+export type GuardedAction = 'discount' | 'refund' | 'cash_out' | 'closing' | 'delete_held' | 'cancel_sale';
 
 /** Ce que la fenêtre d'autorisation dit de l'opération. */
 export const ACTION_LABELS: Record<GuardedAction, string> = {
@@ -14,6 +14,7 @@ export const ACTION_LABELS: Record<GuardedAction, string> = {
   cash_out: 'Sortie d’espèces',
   closing: 'Clôture avec un écart au-delà du seuil',
   delete_held: 'Suppression d’une vente en attente',
+  cancel_sale: 'Annulation d’une vente',
 };
 
 /** Un caissier fait autoriser ; un manager ou un admin fait seul, sans voir la fenêtre d'autorisation. */

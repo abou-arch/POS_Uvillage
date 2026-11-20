@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { matchesCustomer } from '../db/customers';
 import { buildRefund, defaultRefundPayments, refundLines, refundTotals, returnableLines } from '../lib/buildRefund';
 import { buildSale } from '../lib/buildSale';
+import { buildCancel, cancelKey } from '../lib/cancelSale';
+import { buildCustomerPayment } from '../lib/customerPayment';
 import { buildClosing, buildMovement, buildOpening } from '../lib/cashSession';
 import { emptyCart } from '../state/cart';
 import type { CashMovement, CashSessionClosing, CashSessionOpening, Product, Refund, Sale } from '../types';
@@ -62,6 +64,17 @@ function refundOp(original: Sale, quantity = 1): OutboxItem & { refund: Refund }
   });
   return { kind: 'refund', id: refund.id, refund, error: null };
 }
+function cancelOp(original: Sale, approvedBy: string | null = 'u_3'): OutboxItem & { kind: 'sale_cancel' } {
+  const cancel = buildCancel({ sale: original, openSessionId: SESSION, refunds: [], cashAvailable: 1e6, approvedBy });
+  return { kind: 'sale_cancel', id: cancelKey(original.id), cancel, error: null };
+}
+function paymentOp(amount = 2000): OutboxItem & { kind: 'customer_payment' } {
+  const payment = buildCustomerPayment({
+    id: nextId(), storeId: 'st_2', registerId: 'reg_3', sessionId: SESSION, customerId: 'c_1', method: 'cash', amount, balance: null,
+    note: '', createdBy: 'u_2', now,
+  });
+  return { kind: 'customer_payment', id: payment.id, payment, error: null };
+}
 function closeOp(sessionId = SESSION): OutboxItem & { closing: CashSessionClosing } {
   const closing = buildClosing({
     counted: { cash: 56000, card: 8000, mobile: 0 }, expected: { cash: 57000, card: 8000, mobile: 0 }, cashCount: null,
@@ -119,6 +132,17 @@ function fakeServer() {
         server.log.push(`refund:${body.id}`);
         response = json({ id: body.id, status: 'created', session_closed: false }, 201);
       }
+    } else if (/\/sales\/[^/]+\/cancel$/.test(url)) {
+      const saleId = url.split('/').at(-2) ?? '';
+      if (!server.received.has(saleId)) {
+        response = json({ error: { code: 'NOT_FOUND', message: 'Vente introuvable' } }, 404);
+      } else {
+        server.log.push(`cancel:${saleId}:${body.approved_by}`);
+        response = json({ id: saleId, status: 'cancelled' }, 200);
+      }
+    } else if (url.endsWith('/customer-payments')) {
+      server.log.push(`payment:${body.amount}`);
+      response = json({ id: body.id, status: 'created', balance: 0, session_closed: false, balance_exceeded: false }, 201);
     } else if (url.endsWith('/cash-movements')) {
       server.log.push('move');
       response = json({ id: body.id, status: 'created', session_closed: false }, 201);
@@ -359,6 +383,12 @@ describe('catalogue hors ligne', () => {
     expect(put[0].stock).toBe(11);
   });
 
+  it('annulation pas encore reçue : ses articles comptent comme remis en stock', () => {
+    const sold = sale(3, 'p_9');
+    expect([...pendingQuantities([cancelOp(sold)], 'st_2')]).toEqual([['p_9', -3]]); // vente déjà reçue, annulation en route
+    expect([...pendingQuantities([item(sold), cancelOp(sold)], 'st_2')]).toEqual([['p_9', 0]]);
+  });
+
   it('changements reçus : actifs mis à jour (moins les ventes pas encore reçues), désactivés retirés', () => {
     const changes = [product('p_1', 60), product('p_2', 10), product('p_3', 4, { active: false })];
     const { put, remove } = catalogChanges(changes, new Map([['p_1', 2.25]]));
@@ -405,6 +435,26 @@ describe('envoi des opérations de session', () => {
     expect(result.status).toBe('done');
     expect(server.log).toEqual(['open', `sale:${s1.id}`, `refund:${refund.id}`, `sale:${s2.id}`, 'close']);
     expect(outbox.items).toEqual([]);
+  });
+
+  it('annulation et règlement (0.8) : chacun à sa place, l’annulation après sa vente, avec qui l’a autorisée', async () => {
+    const server = fakeServer();
+    const [s1, s2] = [sale(), sale()];
+    const outbox = memoryOutbox([openingOp(), s1, s2, cancelOp(s1), paymentOp(2000), closeOp()]);
+    const result = await flushOutbox(outbox, apiSenders);
+    expect(result.status).toBe('done');
+    expect(server.log).toEqual(['open', `sale:${s1.id}`, `sale:${s2.id}`, `cancel:${s1.id}:u_3`, 'payment:2000', 'close']);
+    expect(outbox.items).toEqual([]);
+  });
+
+  it('annulation d’une vente refusée par le serveur : l’annulation est refusée aussi, gardée avec le motif', async () => {
+    const server = fakeServer();
+    const s1 = sale();
+    server.refuse.add(s1.id);
+    const outbox = memoryOutbox([s1, cancelOp(s1, null)]);
+    const result = await flushOutbox(outbox, apiSenders);
+    expect(result.rejected.map((r) => r.id)).toEqual([s1.id, cancelKey(s1.id)]);
+    expect(outbox.items.map((i) => i.error)).toEqual(['Totaux incohérents', 'Vente introuvable']);
   });
 
   it('retour refusé (422, déjà retourné sur une autre caisse) : gardé avec le motif, la suite part', async () => {
@@ -474,7 +524,8 @@ describe('envoi des opérations de session', () => {
   it('relecture de la file : chaque sorte d’opération, ligne abîmée refusée (ni envoyée ni effacée)', () => {
     const s = sale();
     const [open, move, close, refund] = [openingOp(), movementOp(), closeOp(), refundOp(s)];
-    for (const valid of [item(s), item(s, 'Totaux incohérents'), open, move, close, refund]) expect(isOutboxItem(valid)).toBe(true);
+    const [cancel, payment] = [cancelOp(s), paymentOp()];
+    for (const valid of [item(s), item(s, 'Totaux incohérents'), open, move, close, refund, cancel, payment]) expect(isOutboxItem(valid)).toBe(true);
     const broken = [
       { sale: s, error: null }, // sans « kind » (ancienne version)
       { ...item(s), id: 'autre' }, // clé différente de l'id de la vente
@@ -489,6 +540,11 @@ describe('envoi des opérations de session', () => {
       { ...refund, refund: { ...refund.refund, reason: 'vol' } },
       { ...refund, refund: { ...refund.refund, lines: [] } },
       { ...item(s), error: 42 },
+      { ...cancel, id: s.id }, // l'annulation a sa propre clé
+      { ...cancel, cancel: { ...cancel.cancel, lines: [{ product_id: 'p_1', quantity: 0 }] } },
+      { ...payment, payment: { ...payment.payment, method: 'credit' } },
+      { ...payment, payment: { ...payment.payment, amount: 0 } },
+      { ...payment, id: s.id },
       null,
     ];
     for (const b of broken) expect(isOutboxItem(b), JSON.stringify(b)).toBe(false);
@@ -497,7 +553,9 @@ describe('envoi des opérations de session', () => {
   it('session de chaque opération, et libellé montré au caissier en cas de refus', () => {
     const s = sale();
     const refund = refundOp(s);
-    expect([item(s), openingOp(), movementOp(), closeOp(), refund].map(itemSession)).toEqual([SESSION, SESSION, SESSION, SESSION, SESSION]);
+    expect([item(s), openingOp(), movementOp(), closeOp(), refund, cancelOp(s), paymentOp()].map(itemSession)).toEqual(Array(7).fill(SESSION));
+    expect(describeItem(cancelOp(s))).toBe('Annulation d’une vente');
+    expect(describeItem(paymentOp(2000))).toMatch(/^Règlement client de 20,00/);
     expect(describeItem(item(s))).toBe(`Vente ${s.number}`);
     expect(describeItem(refund)).toBe('Retour R-ST2-REG3-000001');
     expect(describeItem(openingOp())).toBe('Ouverture de caisse');

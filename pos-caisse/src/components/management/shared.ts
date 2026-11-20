@@ -2,6 +2,7 @@
 import { createContext, useEffect, useState, type ReactNode } from 'react';
 import { TIME_ZONE } from '../../config/store';
 import type { ManagementData } from '../../db/management';
+import type { ReceiptData } from '../../lib/receipt';
 import { toCsv } from '../../lib/stats';
 import type { ManagementPage } from '../../state/permissions';
 import type { PrintDoc } from '../../state/usePrint';
@@ -16,12 +17,19 @@ export const TZ = TIME_ZONE;
 export type ManagementPrint = { kind: 'doc'; doc: PrintDoc } | { kind: 'page'; node: ReactNode };
 export type PrintFn = (job: ManagementPrint) => void;
 
+/** Retour ou annulation demandés depuis la Gestion : faits sur l'écran de caisse, dans la session ouverte. */
+export interface SaleRequest { kind: 'refund' | 'cancel'; data: ReceiptData }
+
 /** Ce que reçoit chaque page de gestion. */
 export interface PageProps {
   session: Session;
   data: ManagementData;
   print: PrintFn;
   onNavigate: (page: ManagementPage) => void;
+  /** Session de caisse ouverte sur ce poste, ou null (retour et annulation impossibles). */
+  openSessionId: string | null;
+  /** Ferme la Gestion et ouvre le retour ou l'annulation sur l'écran de caisse ; null sans session ouverte. */
+  onSaleAction: ((request: SaleRequest) => void) | null;
 }
 
 /** Heure courante, relue chaque minute : « aujourd'hui » change à minuit sans recharger la page. */

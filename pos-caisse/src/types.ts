@@ -64,7 +64,8 @@ export interface Product {
 }
 
 // matricule : identifiant universitaire du client (chiffres seulement).
-export interface Customer { id: string; name: string; phone: string | null; matricule: string | null }
+/** balance (contrat 0.8, §4) : reste dû d'après l'API, en centimes ; absent d'une API d'avant 0.8 et hors ligne. */
+export interface Customer { id: string; name: string; phone: string | null; matricule: string | null; balance?: number }
 
 export interface CartLine {
   product_id: string;
@@ -210,6 +211,20 @@ export interface Refund {
 }
 
 /** Réponse de GET /api/sales/by-number/{number} (§5). */
+/** Règlement d'une dette encaissé à la caisse (POST /api/customer-payments, contrat 0.8, §4). */
+export interface CustomerPayment {
+  id: string; // UUID v4 généré par la caisse
+  store_id: string;
+  register_id: string;
+  session_id: string;
+  customer_id: string;
+  method: CountedMethod;
+  amount: number; // centimes, > 0
+  note: string | null;
+  created_by: string;
+  created_at: string;
+}
+
 export interface SaleLookup {
   sale: Sale;
   customer: { id: string; name: string } | null;

@@ -11,7 +11,7 @@ import type { Refund } from '../../types';
 import { Modal } from '../Modal';
 import { Icon } from '../ui';
 import { Chips, Empty, ExportButton } from './common';
-import { downloadCsv, TZ, useNow, type PageProps } from './shared';
+import { downloadCsv, TZ, useNow, type PageProps, type SaleRequest } from './shared';
 
 type When = PeriodKey | 'all';
 const WHEN: When[] = ['today', 'yesterday', 'week', 'month', 'all'];
@@ -22,7 +22,7 @@ const methodsOf = (r: ReceiptData) => [...new Set(r.sale.payments.map((p) => MET
 
 // Ventes de la caisse (les « commandes » d'un back-office) : période, moyen de paiement, recherche par numéro ou client,
 // état d'envoi ; détail d'une vente avec ses retours, réimpression en duplicata, export CSV.
-export function SalesPage({ session, data, print }: PageProps) {
+export function SalesPage({ session, data, print, openSessionId, onSaleAction }: PageProps) {
   const [when, setWhen] = useState<When>('today');
   const [filter, setFilter] = useState<SaleFilter>('all');
   const [query, setQuery] = useState('');
@@ -113,16 +113,21 @@ export function SalesPage({ session, data, print }: PageProps) {
 
       {open && (
         <SaleDetail row={open} refunds={data.refunds.filter((r) => r.original_sale_id === open.data.sale.id)}
+          openSessionId={openSessionId} onSaleAction={onSaleAction}
           onReprint={() => reprint(open.data)} onClose={() => setOpen(null)} />
       )}
     </>
   );
 }
 
-function SaleDetail({ row, refunds, onReprint, onClose }: {
-  row: TicketRow; refunds: Refund[]; onReprint: () => void; onClose: () => void;
+function SaleDetail({ row, refunds, openSessionId, onSaleAction, onReprint, onClose }: {
+  row: TicketRow; refunds: Refund[]; openSessionId: string | null; onSaleAction: ((request: SaleRequest) => void) | null;
+  onReprint: () => void; onClose: () => void;
 }) {
   const { sale, cashier, customer } = row.data;
+  const active = sale.status !== 'cancelled';
+  // Annulation : vente de la session ouverte, sans retour (§5). Sinon, c'est un retour.
+  const cancellable = active && sale.session_id === openSessionId && refunds.length === 0;
   return (
     <Modal title={`Vente ${sale.number}`} className="detail" onClose={onClose}>
       <div className="modal-body">
@@ -168,9 +173,24 @@ function SaleDetail({ row, refunds, onReprint, onClose }: {
             </ul>
           </>
         )}
-        <p className="muted small">Un retour se fait depuis l’écran de caisse (bouton « Retour »), dans la session ouverte.</p>
+        {!onSaleAction && active && (
+          <p className="muted small">Retour et annulation se font dans une session de caisse ouverte.</p>
+        )}
+        {onSaleAction && active && !cancellable && (
+          <p className="muted small">Seules les ventes de la session en cours, sans retour, s’annulent : pour celle-ci, faites un retour.</p>
+        )}
         <div className="modal-actions">
           <button type="button" className="btn secondary" onClick={onClose}>Fermer</button>
+          {onSaleAction && active && (
+            <button type="button" className="btn secondary" onClick={() => onSaleAction({ kind: 'refund', data: row.data })}>
+              <Icon name="swap" size={18} />Retour
+            </button>
+          )}
+          {onSaleAction && cancellable && (
+            <button type="button" className="btn secondary danger-text" onClick={() => onSaleAction({ kind: 'cancel', data: row.data })}>
+              <Icon name="x" size={18} />Annuler la vente
+            </button>
+          )}
           <button type="button" className="btn primary" onClick={onReprint}><Icon name="printer" size={18} />Réimprimer (duplicata)</button>
         </div>
       </div>

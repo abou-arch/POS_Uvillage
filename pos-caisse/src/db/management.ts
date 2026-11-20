@@ -3,6 +3,7 @@
 // ce que le poste garde (les sessions clôturées et envoyées quittent le poste après 31 jours, voir cashSessions.ts).
 import { isRefund } from '../lib/buildRefund';
 import { isLocalMovement, isLocalSession, type LocalCashMovement, type LocalCashSession } from '../lib/cashSession';
+import { isLocalCustomerPayment, type LocalCustomerPayment } from '../lib/customerPayment';
 import type { ReceiptData } from '../lib/receipt';
 import { isSale } from '../state/sales';
 import { isOutboxItem, type OutboxItem } from '../sync/sync';
@@ -14,6 +15,7 @@ import { useLiveQuery } from './useLiveQuery';
 export interface ManagementData {
   receipts: ReceiptData[]; // ventes de la caisse, la plus récente d'abord
   refunds: Refund[];
+  payments: LocalCustomerPayment[]; // règlements de dettes encaissés sur ce poste (contrat 0.8)
   sessions: LocalCashSession[];
   movements: LocalCashMovement[];
   products: Product[];
@@ -21,7 +23,7 @@ export interface ManagementData {
   outbox: OutboxItem[];
 }
 
-const EMPTY: ManagementData = { receipts: [], refunds: [], sessions: [], movements: [], products: [], categories: [], outbox: [] };
+const EMPTY: ManagementData = { receipts: [], refunds: [], payments: [], sessions: [], movements: [], products: [], categories: [], outbox: [] };
 
 export async function managementData(storeId: string, registerId: string): Promise<ManagementData> {
   const [journal, refundRows, sessionRows, products, categories, outbox] = await Promise.all([
@@ -35,12 +37,14 @@ export async function managementData(storeId: string, registerId: string): Promi
   const sessions = sessionRows.filter(isLocalSession);
   const ids = sessions.map((s) => s.id);
   const movements = ids.length ? (await db.cash_movements.where('session_id').anyOf(ids).toArray()).filter(isLocalMovement) : [];
+  const payments = ids.length ? (await db.customer_payments.where('session_id').anyOf(ids).toArray()).filter(isLocalCustomerPayment) : [];
   return {
     receipts: journal.filter((row) => isSale(row.sale))
       .map(({ sale, cashier, customer }) => ({ sale, cashier, customer }))
       .sort((a, b) => b.sale.created_at.localeCompare(a.sale.created_at)),
     refunds: refundRows.filter((row) => row.register_id === registerId).map((row) => row.refund).filter(isRefund)
       .sort((a, b) => b.created_at.localeCompare(a.created_at)),
+    payments,
     sessions,
     movements,
     products,

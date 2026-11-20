@@ -2,17 +2,22 @@
 // sont passées en paramètres. Tout ce qui décide quoi envoyer, quoi garder et quand réessayer est ici, et testé.
 import { api, ApiError } from '../api/client';
 import { isRefund } from '../lib/buildRefund';
+import { cancelKey, isSaleCancel, type SaleCancel } from '../lib/cancelSale';
 import { isClosing, isMovement, isOpening, MOVEMENT_LABELS } from '../lib/cashSession';
+import { isCustomerPayment } from '../lib/customerPayment';
 import { formatMad } from '../lib/totals.js';
 import { isSale, isUuid } from '../state/sales';
-import type { CashMovement, CashSessionClosing, CashSessionOpening, Product, Refund, Sale } from '../types';
+import type { CashMovement, CashSessionClosing, CashSessionOpening, CustomerPayment, Product, Refund, Sale } from '../types';
 
 /**
- * Ce que la caisse garde pour l'envoyer à l'API (§9, §10) : les ventes, les retours, et l'ouverture, les mouvements
- * d'espèces et la clôture des sessions. Tout part dans l'ordre où cela a été fait : l'API reçoit l'ouverture avant les ventes.
+ * Ce que la caisse garde pour l'envoyer à l'API (§9, §10) : les ventes, leurs annulations, les retours, les règlements de
+ * dettes, et l'ouverture, les mouvements d'espèces et la clôture des sessions. Tout part dans l'ordre où cela a été fait :
+ * l'API reçoit l'ouverture avant les ventes, une vente avant son annulation.
  */
 export type OutboxOperation =
   | { kind: 'sale'; sale: Sale }
+  | { kind: 'sale_cancel'; cancel: SaleCancel }
+  | { kind: 'customer_payment'; payment: CustomerPayment }
   | { kind: 'refund'; refund: Refund }
   | { kind: 'session_open'; opening: CashSessionOpening }
   | { kind: 'cash_movement'; movement: CashMovement }
@@ -39,6 +44,8 @@ export interface BatchResponse { results: { id: string; status: string; error?: 
 export interface OutboxApi {
   sales: (sales: Sale[]) => Promise<BatchResponse>;
   refund: (refund: Refund) => Promise<unknown>;
+  cancelSale: (saleId: string, approvedBy: string | null) => Promise<unknown>;
+  customerPayment: (payment: CustomerPayment) => Promise<unknown>;
   openSession: (opening: CashSessionOpening) => Promise<unknown>;
   addMovement: (movement: CashMovement) => Promise<unknown>;
   closeSession: (sessionId: string, closing: CashSessionClosing) => Promise<unknown>;
@@ -47,6 +54,8 @@ export interface OutboxApi {
 export const apiSenders: OutboxApi = {
   sales: api.syncSales,
   refund: api.createRefund,
+  cancelSale: api.cancelSale,
+  customerPayment: api.createCustomerPayment,
   openSession: api.openCashSession,
   addMovement: api.addCashMovement,
   closeSession: api.closeCashSession,
@@ -67,6 +76,8 @@ const refusal = (err: unknown) => (err instanceof Error && err.message ? err.mes
 function sendOne(send: OutboxApi, item: Exclude<OutboxItem, SaleItem>): Promise<unknown> {
   switch (item.kind) {
     case 'refund': return send.refund(item.refund);
+    case 'sale_cancel': return send.cancelSale(item.cancel.sale_id, item.cancel.approved_by);
+    case 'customer_payment': return send.customerPayment(item.payment);
     case 'session_open': return send.openSession(item.opening);
     case 'cash_movement': return send.addMovement(item.movement);
     case 'session_close': return send.closeSession(item.session_id, item.closing);
@@ -152,6 +163,8 @@ export function isOutboxItem(v: unknown): v is OutboxItem {
   switch (e.kind) {
     case 'sale': return isSale(e.sale) && e.sale.id === e.id;
     case 'refund': return isRefund(e.refund) && e.refund.id === e.id;
+    case 'sale_cancel': return isSaleCancel(e.cancel) && e.id === cancelKey(e.cancel.sale_id);
+    case 'customer_payment': return isCustomerPayment(e.payment) && e.payment.id === e.id;
     case 'session_open': return isOpening(e.opening) && e.opening.id === e.id;
     case 'cash_movement': return isMovement(e.movement) && e.movement.id === e.id;
     case 'session_close': return isUuid(e.session_id) && isClosing(e.closing) && e.id === closeKey(e.session_id);
@@ -164,6 +177,8 @@ export function itemSession(item: OutboxOperation): string {
   switch (item.kind) {
     case 'sale': return item.sale.session_id;
     case 'refund': return item.refund.session_id;
+    case 'sale_cancel': return item.cancel.session_id;
+    case 'customer_payment': return item.payment.session_id;
     case 'session_open': return item.opening.id;
     case 'cash_movement': return item.movement.session_id;
     case 'session_close': return item.session_id;
@@ -175,6 +190,8 @@ export function describeItem(item: OutboxOperation): string {
   switch (item.kind) {
     case 'sale': return `Vente ${item.sale.number}`;
     case 'refund': return `Retour ${item.refund.number}`;
+    case 'sale_cancel': return 'Annulation d’une vente';
+    case 'customer_payment': return `Règlement client de ${formatMad(item.payment.amount)}`;
     case 'session_open': return 'Ouverture de caisse';
     case 'cash_movement': return `${MOVEMENT_LABELS[item.movement.type]} d’espèces de ${formatMad(item.movement.amount)}`;
     case 'session_close': return 'Clôture de caisse';
@@ -254,8 +271,8 @@ export function createSyncLoop(
 const round3 = (n: number) => Math.round(n * 1000) / 1000; // stock au poids : 3 décimales
 
 /**
- * Quantités vendues sur ce magasin et pas encore reçues par le serveur, par article, moins les quantités retournées
- * pas encore reçues (négatif : le serveur n'a pas encore remis ces articles en stock).
+ * Quantités vendues sur ce magasin et pas encore reçues par le serveur, par article, moins les quantités retournées ou
+ * annulées pas encore reçues (négatif : le serveur n'a pas encore remis ces articles en stock).
  */
 export function pendingQuantities(outbox: OutboxOperation[], storeId: string): Map<string, number> {
   const quantities = new Map<string, number>();
@@ -263,6 +280,7 @@ export function pendingQuantities(outbox: OutboxOperation[], storeId: string): M
   for (const item of outbox) {
     if (item.kind === 'sale' && item.sale.store_id === storeId) for (const l of item.sale.lines) add(l.product_id, l.quantity);
     if (item.kind === 'refund' && item.refund.store_id === storeId) for (const l of item.refund.lines) add(l.product_id, -l.quantity);
+    if (item.kind === 'sale_cancel' && item.cancel.store_id === storeId) for (const l of item.cancel.lines) add(l.product_id, -l.quantity);
   }
   return quantities;
 }

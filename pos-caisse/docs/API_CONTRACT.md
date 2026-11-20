@@ -1,11 +1,14 @@
 # Contrat d'API — Caisse (POS) ↔ Application web
 
-Version 0.7 pour la caisse, 0.8 proposée pour le back-office (§12) — à valider par l’équipe.
+Version 0.7, 0.8 proposée (caisse et back-office) — à valider par l’équipe.
 
 Changements par version :
 
-- **0.8 (proposition, rien ne change pour la caisse)** : le serveur de l'équipe (`server/`) et son back-office.
+- **0.8 (proposition)** : le serveur de l'équipe (`server/`), son back-office, et trois fonctions de la caisse.
   - §2 : `POST /api/auth/logout` révoque le token.
+  - §4 : reste dû (`balance`) de chaque client dans `GET /api/customers` et `POST /api/customers`. Nouvelle route `POST /api/customer-payments` : règlement d'une dette à la caisse.
+  - §5 et §11 : un caissier peut annuler une vente avec l'accord d'un responsable (`approved_by` dans `POST /api/sales/{id}/cancel`).
+  - §9 : les ventes annulées ne comptent pas dans les montants attendus ; les règlements de dettes y comptent. L'annulation et les règlements passent par la file d'envoi.
   - §3 : `updated_at` des articles à la milliseconde (toujours ISO 8601).
   - Nouveau §12 : routes du back-office (`/api/admin/*`), réservées aux rôles `admin` et `manager`.
   - §8 : propositions pour les points 6 (matricule unique), 7 (clôture depuis le back-office) et 10 (PIN fixé au back-office).
@@ -170,18 +173,46 @@ Les clients de l'université sont identifiés par leur **matricule** : chiffres 
 `search` porte sur le nom, le téléphone et le matricule.
 
 ```json
-[ { "id": "c_8", "name": "Ahmed", "phone": "+212600000000", "matricule": "2023001542" } ]
+[ { "id": "c_8", "name": "Ahmed", "phone": "+212600000000", "matricule": "2023001542", "balance": 4500 } ]
 ```
 
-Le « client de passage » n'est pas un client en base : la vente a simplement `customer_id: null`.
+- `balance` (0.8) : reste dû du client, en centimes, d'après ce que l'API a reçu = crédit des ventes non annulées (paiements `credit` et partie non payée) − crédit rendu par les retours − règlements. Négatif : le client a un avoir. Absent d'une API d'avant 0.8 : la caisse ne l'affiche pas.
+- Le « client de passage » n'est pas un client en base : la vente a simplement `customer_id: null`.
 
 ### `POST /api/customers`
 
 ```json
 // Requête : id UUID v4 généré par la caisse
 { "id": "7f3c2a9e-1b4d-4c8e-9f21-3a5b6c7d8e9f", "name": "Nouveau client", "phone": "+212600000001", "matricule": "2024000187" }
-// Réponse 201 : le client créé (l'id envoyé par la caisse est conservé)
+// Réponse 201 : le client créé (l'id envoyé par la caisse est conservé), avec "balance": 0
 ```
+
+### `POST /api/customer-payments` (0.8)
+
+Règlement d'une dette (ventes à crédit) encaissé à la caisse, dans la session ouverte. Il passe par la file d'envoi comme une vente (§9).
+
+```json
+// Requête : id UUID v4 généré par la caisse
+{
+  "id": "5d1e8c2a-7b3f-4a9e-8c21-0f4b6a7d9e13",
+  "store_id": "st_1", "register_id": "reg_1", "session_id": "9b2f…",
+  "customer_id": "c_8",
+  "method": "cash",
+  "amount": 5000,
+  "note": null,
+  "created_by": "u_12",
+  "created_at": "2026-11-19T10:15:00Z"
+}
+// Réponse 201
+{ "id": "5d1e8c2a-…", "status": "created", "balance": 2500, "session_closed": false, "balance_exceeded": false }
+```
+
+- `method` : `cash`, `card` ou `mobile` (pas `credit`). `amount` > 0. `note` : texte de 200 caractères au plus, ou `null`.
+- Idempotent par `id` : renvoyé, il donne `200` avec `status: "duplicate"` et le reste dû actuel.
+- `balance` : reste dû du client après ce règlement.
+- Session : mêmes règles qu'une vente (§5) : `422 SESSION_UNKNOWN`, `422 SESSION_MISMATCH` ; une session déjà clôturée n'empêche pas l'enregistrement (`session_closed: true`, signalé au back-office).
+- La caisse ne propose pas plus que le reste dû qu'elle connaît. Hors ligne, elle ne le connaît pas à jour : un règlement supérieur au reste dû est accepté (l'argent a été reçu) avec `balance_exceeded: true`, et signalé au back-office.
+- Client inconnu → `404 NOT_FOUND` ; magasin hors des `store_ids` de l'utilisateur → `403 FORBIDDEN` ; données invalides → `400 INVALID_DATA`.
 
 ## 5. Ventes
 
@@ -287,14 +318,27 @@ Hors ligne, la caisse ne retrouve que les ventes faites sur ce poste. Elle ne vo
 
 ### `POST /api/sales/{id}/cancel`
 
-Annule une vente (rôle `manager` ou `admin`) et remet le stock. Une vente qui a déjà au moins un retour (§10) ne peut plus être annulée (`422 SALE_REFUNDED`).
+Annule une vente et remet le stock. Une vente qui a déjà au moins un retour (§10) ne peut plus être annulée (`422 SALE_REFUNDED`).
+
+```json
+// Requête (0.8) : qui a autorisé l'annulation (§11), ou null. Corps vide accepté (avant 0.8).
+{ "approved_by": "u_3" }
+// Réponse 200
+{ "id": "…", "status": "cancelled" }
+```
+
+- Un `manager` ou un `admin` du magasin annule seul.
+- Un `cashier` annule avec `approved_by` = l'`id` d'un responsable du magasin (§11) ; sinon `403 FORBIDDEN`.
+- Idempotent : une vente déjà annulée renvoie la même réponse.
+- Vente inconnue, ou d'un magasin hors des `store_ids` de l'utilisateur → `404 NOT_FOUND`.
+- La caisse n'annule que les ventes de sa session ouverte qui n'ont pas de retour. L'annulation passe par la file d'envoi (§9), après la vente.
 
 ## 6. Ce qui reste côté caisse uniquement
 
 - Les ventes **en attente** (bouton Hold / liste d'attente) restent dans la caisse et ne sont envoyées qu'une fois payées.
 - Le cache du catalogue et la file d'attente des ventes hors ligne (IndexedDB).
 - Le ticket 80 mm (impression navigateur).
-- Le rapport de session (rapport X pendant la session, rapport de clôture) : calculé et imprimé par la caisse à partir de ses propres ventes, retours et mouvements, rien n'est envoyé en plus de ce que décrit le §9.
+- Le rapport de session (rapport X pendant la session, rapport de clôture) : calculé et imprimé par la caisse à partir de ses propres ventes, retours, règlements et mouvements, rien n'est envoyé en plus de ce que décrit le §9.
 
 ## 7. Calcul HT / TVA / TTC (référence commune)
 
@@ -499,10 +543,13 @@ Réponse `200` :
 espèces : expected = opening_cash
                    + somme des paiements "cash" des ventes de la session
                    − somme des remboursements "cash" des retours de la session
+                   + somme des règlements "cash" de la session (0.8)
                    + somme des mouvements "in" − somme des mouvements "out"
-carte   : expected = paiements "card" des ventes − remboursements "card" des retours de la session
-mobile  : expected = paiements "mobile" des ventes − remboursements "mobile" des retours de la session
+carte   : expected = paiements "card" des ventes − remboursements "card" des retours + règlements "card" de la session
+mobile  : expected = paiements "mobile" des ventes − remboursements "mobile" des retours + règlements "mobile" de la session
 ```
+
+Les ventes annulées (§5) n'y comptent pas : l'argent a été rendu au client.
 
 Un retour compte dans la session où il est fait, même si la vente d'origine est d'une autre session. Les remboursements `credit` n'y figurent pas : aucun argent ne sort. La caisse refuse un remboursement en espèces supérieur aux espèces attendues dans le tiroir, comme une sortie : l'attendu des espèces ne devient donc jamais négatif.
 
@@ -519,7 +566,7 @@ Montants attendus : 570 DH en espèces, 80 DH par carte et 0 DH en mobile. Si on
 
 ### Envoi hors ligne
 
-Tout se fait sans connexion. La caisse garde l'ouverture, les ventes, les retours (§10), les mouvements et la clôture dans **une seule file**, et les envoie **dans l'ordre où ils ont été faits**. Les ventes qui se suivent partent ensemble par `POST /api/sales/batch`.
+Tout se fait sans connexion. La caisse garde l'ouverture, les ventes, les annulations (§5), les retours (§10), les règlements (§4), les mouvements et la clôture dans **une seule file**, et les envoie **dans l'ordre où ils ont été faits**. Les ventes qui se suivent partent ensemble par `POST /api/sales/batch`.
 
 L'API reçoit donc toujours l'ouverture d'une session avant ses ventes, retours et mouvements, et sa clôture en dernier. Elle reçoit aussi une vente faite sur ce poste avant ses retours. Seule exception : une opération refusée puis renvoyée plus tard, d'où les règles `session_closed` et `expected_mismatch` ci-dessus.
 
@@ -617,6 +664,7 @@ Certaines opérations faites par un utilisateur `cashier` demandent l'accord d'u
 | Retour, quel qu'il soit | `approved_by` du retour (§10) |
 | Sortie d'espèces | `approved_by` du mouvement (§9) |
 | Clôture avec un écart au-delà du seuil du magasin | `approved_by` de la clôture (§9) |
+| Annulation d'une vente de la session (0.8) | `approved_by` de l'annulation (§5) |
 | Suppression d'une vente en attente | rien n'est envoyé : les ventes en attente restent sur la caisse (§6) |
 
 `approved_by` est l'`id` du responsable, ou `null` quand l'opération n'a pas demandé d'autorisation. Les opérations envoyées avant la version 0.6 n'ont pas ce champ : l'API le prend pour `null`. L'API l'enregistre tel quel et ne refait pas les contrôles, car le plafond, le seuil ou les responsables ont pu changer depuis une opération faite hors ligne. Si ce n'est pas l'`id` d'un responsable du magasin, l'API accepte quand même l'opération (elle a eu lieu) et la signale au back-office.
@@ -717,7 +765,7 @@ Toute modification d'un article ou de son stock change son `updated_at` : les ca
 | `GET /api/admin/cash-sessions?store_id&status&from&to` · `GET …/{id}` | Sessions avec attendus recalculés par l'API, comptages, écarts, mouvements d'espèces. |
 | `POST /api/admin/cash-sessions/{id}/force-close` | §8 point 7 : `{ note }` obligatoire. La session est clôturée sans comptage et marquée `forced`. Une caisse qui envoie encore des ventes de cette session les voit acceptées avec `session_closed: true` (§5). |
 
-L'annulation d'une vente passe par la route du §5 (`POST /api/sales/{id}/cancel`).
+L'annulation d'une vente passe par la route du §5 (`POST /api/sales/{id}/cancel`). Le back-office montre qui l'a autorisée.
 
 ### Clients et règlements
 
@@ -728,7 +776,7 @@ L'annulation d'une vente passe par la route du §5 (`POST /api/sales/{id}/cancel
 | `POST /api/admin/customers` · `PUT …/{id}` | Mêmes contrôles qu'au §4. §8 point 6 proposé : matricule unique (`409 MATRICULE_TAKEN`). |
 | `POST /api/admin/customers/{id}/payments` | Règlement d'une dette : `{ id?, store_id, method, amount, note }`, `method` ∈ `cash`, `card`, `mobile`. Idempotent par `id` (UUID). Jamais plus que le reste dû (`422 PAYMENT_EXCEEDS_BALANCE`). |
 
-Reste dû = crédit des ventes non annulées − crédit rendu par les retours − règlements.
+Reste dû = crédit des ventes non annulées − crédit rendu par les retours − règlements (back-office et caisse, §4).
 
 ### Utilisateurs, magasins, balance (admin)
 

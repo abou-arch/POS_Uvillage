@@ -93,3 +93,4 @@ export const sales = new Map();
 export const cashSessions = new Map(); // sessions de caisse (§9)
 export const cashMovements = new Map(); // entrées et sorties d'espèces (§9)
 export const refunds = new Map(); // retours (§10)
+export const customerPayments = new Map(); // règlements de dettes faits à la caisse (§4, contrat 0.8)

@@ -1,9 +1,13 @@
-// File d'envoi (outbox) dans IndexedDB : ventes, retours, ouvertures, mouvements d'espèces et clôtures, dans l'ordre.
+// File d'envoi (outbox) dans IndexedDB : ventes, annulations, retours, règlements, ouvertures, mouvements d'espèces et
+// clôtures, dans l'ordre.
 import { isRefund } from '../lib/buildRefund';
 import { decrementStock } from '../lib/buildSale';
-import type { Refund, Sale } from '../types';
+import { buildCancel, cancelKey, CancelError } from '../lib/cancelSale';
+import type { LocalCustomerPayment } from '../lib/customerPayment';
+import { isSale } from '../state/sales';
+import type { CustomerPayment, Refund, Sale } from '../types';
 import { isOutboxItem, type OutboxItem, type OutboxOperation, type OutboxStore } from '../sync/sync';
-import { counterKey, db, refundCounterKey, type OutboxEntry } from './db';
+import { counterKey, db, refundCounterKey, type JournalRow, type OutboxEntry } from './db';
 import { ensureMigrated } from './migrate';
 
 /** Une ligne écrite par une autre version de la caisse (ou abîmée) n'est ni envoyée ni effacée. */
@@ -95,4 +99,54 @@ export async function recordRefund(
     await db.products.bulkPut(decrementStock(cached.filter((p) => p !== undefined), back));
     return refund;
   });
+}
+
+/**
+ * Annule une vente de la session ouverte (§5, contrat 0.8), en une seule transaction : la vente est marquée annulée dans
+ * le journal, l'annulation part dans l'outbox (après la vente), les articles reviennent dans le stock du cache. Les retours
+ * de la vente sont relus dans la transaction : un retour fait entre-temps bloque l'annulation.
+ * Lève CancelError (message pour le caissier) ou SessionNotOpenError.
+ */
+export async function recordCancel(
+  saleId: string,
+  registerId: string,
+  approvedBy: string | null,
+  cashAvailable: number,
+): Promise<JournalRow> {
+  return db.transaction('rw', [db.outbox, db.products, db.journal, db.cash_sessions, db.refunds], async () => {
+    const row = await db.journal.get(saleId);
+    if (!row || !isSale(row.sale)) throw new CancelError('Vente introuvable sur cette caisse.');
+    const session = await db.cash_sessions.get(row.sale.session_id);
+    if (session?.status !== 'open' || session.register_id !== registerId) {
+      throw new CancelError('Seules les ventes de la session en cours s’annulent : pour une vente plus ancienne, faites un retour.');
+    }
+    const refunds = (await db.refunds.where('original_sale_id').equals(saleId).toArray()).map((r) => r.refund).filter(isRefund);
+    const cancel = buildCancel({ sale: row.sale, openSessionId: session.id, refunds, cashAvailable, approvedBy });
+    await enqueue({ kind: 'sale_cancel', id: cancelKey(saleId), cancel });
+    const updated: JournalRow = { ...row, sale: { ...row.sale, status: 'cancelled' } };
+    await db.journal.put(updated);
+    const cached = await db.products.bulkGet(cancel.lines.map((l): [string, string] => [cancel.store_id, l.product_id]));
+    const back = cancel.lines.map((l) => ({ product_id: l.product_id, quantity: -l.quantity })); // les articles reviennent en stock
+    await db.products.bulkPut(decrementStock(cached.filter((p) => p !== undefined), back));
+    return updated;
+  });
+}
+
+/**
+ * Règlement d'une dette (§4, contrat 0.8), en une seule transaction : gardé sur la caisse (attendus et rapport de la
+ * session) et mis dans l'outbox. Refusé si la session n'est plus ouverte sur cette caisse.
+ */
+export async function recordCustomerPayment(
+  payment: CustomerPayment,
+  names: { customer: string; cashier: string },
+  balanceBefore: number | null,
+): Promise<LocalCustomerPayment> {
+  const local: LocalCustomerPayment = { ...payment, customer_name: names.customer, cashier_name: names.cashier, balance_before: balanceBefore };
+  await db.transaction('rw', [db.cash_sessions, db.customer_payments, db.outbox], async () => {
+    const session = await db.cash_sessions.get(payment.session_id);
+    if (session?.status !== 'open' || session.register_id !== payment.register_id) throw new SessionNotOpenError();
+    await db.customer_payments.add(local);
+    await enqueue({ kind: 'customer_payment', id: payment.id, payment });
+  });
+  return local;
 }

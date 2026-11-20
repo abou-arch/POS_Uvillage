@@ -4,13 +4,15 @@
 import { pbkdf2Sync, randomBytes } from 'node:crypto';
 import express from 'express';
 import cors from 'cors';
-import { users, stores, categories, brands, products, customers, sales, cashSessions, cashMovements, refunds, barcodeRules } from './data.js';
+import {
+  users, stores, categories, brands, products, customers, sales, cashSessions, cashMovements, refunds, customerPayments, barcodeRules,
+} from './data.js';
 import { loadState, saveState } from './state.js';
 import { startBreakline } from './breakline.js';
 import { paidByLine, refundLine, saleTotals } from '../src/lib/totals.js';
 
 // Ventes, retours, sessions et stocks sont gardés dans mock-api/state.json : relancer la fausse API ne perd rien.
-const state = { sales, cashSessions, cashMovements, refunds, customers, products };
+const state = { sales, cashSessions, cashMovements, refunds, customerPayments, customers, products };
 loadState(state);
 const save = () => saveState(state);
 
@@ -103,20 +105,66 @@ app.get('/api/stores/:id/barcode-rules', (req, res) => {
   res.json({ rules: barcodeRules[req.params.id] ?? [] });
 });
 
+/**
+ * Reste dû d'un client (§4, contrat 0.8) : crédit des ventes non annulées (paiements « credit » et partie non payée)
+ * − crédit rendu par les retours − règlements reçus.
+ */
+function customerBalance(customerId) {
+  const creditOf = (payments) => payments.filter((p) => p.method === 'credit').reduce((n, p) => n + p.amount, 0);
+  let balance = 0;
+  for (const s of sales.values()) {
+    if (s.customer_id !== customerId || s.status === 'cancelled') continue;
+    balance += creditOf(s.payments ?? []) + s.totals.ttc - (s.payments ?? []).reduce((n, p) => n + p.amount, 0);
+  }
+  for (const r of refunds.values()) if (r.customer_id === customerId) balance -= creditOf(r.payments ?? []);
+  for (const p of customerPayments.values()) if (p.customer_id === customerId) balance -= p.amount;
+  return balance;
+}
+const withBalance = (c) => ({ ...c, balance: customerBalance(c.id) });
+
 app.get('/api/customers', (req, res) => {
   const q = String(req.query.search ?? '').toLowerCase();
-  res.json(customers.filter((c) => !q || c.name.toLowerCase().includes(q) || c.phone?.includes(q) || c.matricule?.includes(q)));
+  res.json(customers.filter((c) => !q || c.name.toLowerCase().includes(q) || c.phone?.includes(q) || c.matricule?.includes(q)).map(withBalance));
 });
 
 app.post('/api/customers', (req, res) => {
   const { id, name, phone = null, matricule = null } = req.body ?? {};
   if (!name) return err(res, 400, 'NAME_REQUIRED', 'Le nom est obligatoire');
   const existing = customers.find((c) => c.id === id);
-  if (existing) return res.status(200).json(existing);
+  if (existing) return res.status(200).json(withBalance(existing));
   const customer = { id: id ?? `c_${crypto.randomUUID()}`, name, phone, matricule };
   customers.push(customer);
   save();
-  res.status(201).json(customer);
+  res.status(201).json(withBalance(customer));
+});
+
+// Règlement d'une dette à la caisse (§4, contrat 0.8) : idempotent ; accepté même si la session est clôturée ou si le
+// montant dépasse le reste dû (fait hors ligne) : signalé.
+app.post('/api/customer-payments', (req, res) => {
+  const b = req.body ?? {};
+  const known = customerPayments.get(b.id);
+  if (known) {
+    return res.json({ id: b.id, status: 'duplicate', balance: customerBalance(known.customer_id),
+      session_closed: known.session_closed, balance_exceeded: known.balance_exceeded });
+  }
+  if (!UUID.test(b.id ?? '') || !isId(b.store_id) || !isId(b.register_id) || !isId(b.session_id) || !isId(b.customer_id)
+    || !COUNTED_METHODS.includes(b.method) || !isInt(b.amount, 1) || !isNote(b.note) || !isId(b.created_by) || !isDate(b.created_at)) {
+    return err(res, 400, 'INVALID_DATA', 'Règlement invalide');
+  }
+  if (!req.user.store_ids.includes(b.store_id)) return err(res, 403, 'FORBIDDEN', 'Magasin non autorisé');
+  if (!customers.some((c) => c.id === b.customer_id)) return err(res, 404, 'NOT_FOUND', 'Client introuvable');
+  const { session, ...refused } = sessionOf(b);
+  if (!session) return res.status(refused.status).json(refused.body);
+  const session_closed = session.status === 'closed';
+  const balance_exceeded = b.amount > customerBalance(b.customer_id);
+  if (balance_exceeded) console.warn(`Règlement ${b.id} supérieur au reste dû du client ${b.customer_id} : à vérifier au back-office`);
+  customerPayments.set(b.id, {
+    id: b.id, store_id: b.store_id, register_id: b.register_id, session_id: b.session_id, customer_id: b.customer_id, method: b.method,
+    amount: b.amount, note: b.note ?? null, created_by: b.created_by, created_at: b.created_at, session_closed, balance_exceeded,
+    received_at: new Date().toISOString(),
+  });
+  save();
+  res.status(201).json({ id: b.id, status: 'created', balance: customerBalance(b.customer_id), session_closed, balance_exceeded });
 });
 
 /** §5 et §10 : une vente ou un retour porte la session ouverte de sa caisse. Renvoie l'erreur, ou la session. */
@@ -184,10 +232,16 @@ app.post('/api/sales/batch', (req, res) => {
   res.json({ results });
 });
 
+// Annulation (§5) : un responsable, ou un caissier avec l'accord d'un responsable du magasin (approved_by, contrat 0.8).
 app.post('/api/sales/:id/cancel', (req, res) => {
-  if (!['admin', 'manager'].includes(req.user.role)) return err(res, 403, 'FORBIDDEN', 'Réservé au gérant');
+  const approvedBy = req.body?.approved_by ?? null;
+  if (!isApproval(approvedBy)) return err(res, 400, 'INVALID_DATA', 'approved_by invalide');
   const sale = sales.get(req.params.id);
-  if (!sale) return err(res, 404, 'NOT_FOUND', 'Vente introuvable');
+  if (!sale || !req.user.store_ids.includes(sale.store_id)) return err(res, 404, 'NOT_FOUND', 'Vente introuvable');
+  const responsible = (u) => u && ['admin', 'manager'].includes(u.role) && u.store_ids.includes(sale.store_id);
+  if (!['admin', 'manager'].includes(req.user.role) && !responsible(users.find((u) => u.id === approvedBy))) {
+    return err(res, 403, 'FORBIDDEN', 'Annulation réservée à un responsable du magasin');
+  }
   if (sale.status === 'cancelled') return res.json({ id: sale.id, status: 'cancelled' });
   if ([...refunds.values()].some((r) => r.original_sale_id === sale.id)) {
     return err(res, 422, 'SALE_REFUNDED', 'Cette vente a déjà des retours : elle ne peut plus être annulée');
@@ -198,6 +252,7 @@ app.post('/api/sales/:id/cancel', (req, res) => {
   }
   breakline?.adjust(`cancel:${sale.id}`, sale.lines.map((l) => [l.product_id, l.quantity]));
   sale.status = 'cancelled';
+  sale.cancel_approved_by = approvedBy;
   save();
   res.json({ id: sale.id, status: 'cancelled' });
 });
@@ -301,19 +356,20 @@ const publicSession = (s) => Object.fromEntries(SESSION_FIELDS.map((k) => [k, s[
 const COUNTED_METHODS = ['cash', 'card', 'mobile']; // le crédit n'est pas de l'argent reçu
 
 /**
- * Montants attendus d'après ce que l'API a reçu (§9) : espèces = fond + ventes − remboursements + entrées − sorties ;
- * carte, mobile = ventes − remboursements de la session.
+ * Montants attendus d'après ce que l'API a reçu (§9) : espèces = fond + ventes non annulées − remboursements
+ * + règlements de dettes + entrées − sorties ; carte, mobile = ventes − remboursements + règlements de la session.
  */
 function expectedByMethod(session) {
   const expected = { cash: session.opening_cash, card: 0, mobile: 0 };
   for (const sale of sales.values()) {
-    if (sale.session_id !== session.id) continue;
+    if (sale.session_id !== session.id || sale.status === 'cancelled') continue;
     for (const p of sale.payments ?? []) if (p.method in expected) expected[p.method] += p.amount;
   }
   for (const refund of refunds.values()) {
     if (refund.session_id !== session.id) continue;
     for (const p of refund.payments) if (p.method in expected) expected[p.method] -= p.amount;
   }
+  for (const p of customerPayments.values()) if (p.session_id === session.id && p.method in expected) expected[p.method] += p.amount;
   for (const m of cashMovements.values()) if (m.session_id === session.id) expected.cash += m.type === 'in' ? m.amount : -m.amount;
   return expected;
 }

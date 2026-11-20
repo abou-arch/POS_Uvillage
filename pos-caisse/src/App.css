@@ -529,3 +529,17 @@ label small { color:var(--muted); font-weight:400; }
 .t-vat th, .t-vat td { padding:0; text-align:right; } .t-vat th:first-child, .t-vat td:first-child { text-align:left; }
 .receipt footer { margin-top:6px; }
 .receipt :lang(ar) { font-family:Tahoma, Arial, sans-serif; } /* une police à chasse fixe étire l'arabe */
+
+/* Règlement d'un client et annulation d'une vente (contrat 0.8) */
+.segmented.three { grid-template-columns:repeat(3, minmax(0, 1fr)); }
+.payment-customer { display:grid; gap:6px; font-size:14px; font-weight:500; }
+.payment-customer .customer-picker, .payment-customer .customer { width:100%; }
+.balance-due { margin:0; padding:10px 12px; border-radius:10px; background:var(--amber-soft); color:var(--amber-text); font-size:15px; }
+.balance-due strong { font-variant-numeric:tabular-nums; }
+.balance-due.none { background:var(--green-soft); color:var(--green-dark); }
+.give-back { display:grid; gap:6px; margin:0; padding:0; list-style:none; }
+.give-back li { display:flex; justify-content:space-between; gap:12px; padding:10px 12px; background:var(--red-soft); border-radius:10px; color:var(--red); font-weight:600; }
+.give-back strong { font-variant-numeric:tabular-nums; }
+.customer-balance { color:var(--amber-text); font-weight:600; }
+@media (max-width: 520px) { .segmented.three { grid-template-columns:1fr; } }
+.btn.danger-text { color:var(--red); } .btn.danger-text:hover:not(:disabled) { border-color:var(--red); }

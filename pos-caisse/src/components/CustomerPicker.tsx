@@ -1,5 +1,6 @@
 import { useEffect, useId, useState, type KeyboardEvent } from 'react';
 import { searchCustomers } from '../db/customers';
+import { formatMad } from '../lib/totals.js';
 import { prefillFrom, type CustomerForm } from '../state/customers';
 import type { Customer } from '../types';
 import { NewCustomerModal } from './NewCustomerModal';
@@ -11,8 +12,10 @@ const MAX_SUGGESTIONS = 8;
 
 type Option = { kind: 'customer'; customer: Customer } | { kind: 'create' };
 
+// Reste dû (contrat 0.8) : montré quand l'API l'a donné, pour que le caissier le voie avant une nouvelle vente à crédit.
 const details = (c: Customer) =>
-  [c.matricule && `Matricule ${c.matricule}`, c.phone ?? 'Sans téléphone'].filter(Boolean).join(' · ');
+  [c.matricule && `Matricule ${c.matricule}`, c.phone ?? 'Sans téléphone', c.balance !== undefined && c.balance > 0 && `Doit ${formatMad(c.balance)}`]
+    .filter(Boolean).join(' · ');
 
 // Sélecteur de client comme dans Falcon POS : recherche avec suggestions, « + » pour créer,
 // « × » pour revenir au client de passage (customer = null).

@@ -192,6 +192,11 @@ describe('ventes, sessions, clients', () => {
     expect(rows.map((r) => r.session.id)).toEqual(['ses_new', 'ses_old']);
     expect(rows[1]).toMatchObject({ tickets: 2, net: 20000, cashOut: 5000, cashIn: 0, expectedCash: 57000, difference: -1000 });
     expect(rows[0]).toMatchObject({ tickets: 0, net: 0, expectedCash: 50000, difference: null });
+    // Règlements de dettes (contrat 0.8) : les espèces reçues s'ajoutent à l'attendu de leur session.
+    const paid = sessionRows([session('ses_old', '2026-11-17T08:00:00Z', true)], [s1, s2], [], [out], [
+      { session_id: 'ses_old', method: 'cash', amount: 2000 }, { session_id: 'ses_old', method: 'card', amount: 900 }, { session_id: 'ses_new', method: 'cash', amount: 1 },
+    ]);
+    expect(paid[0].expectedCash).toBe(59000);
   });
 
   it('clients : achats, crédit restant après retour, client de passage et ventes annulées écartés', () => {
@@ -203,6 +208,8 @@ describe('ventes, sessions, clients', () => {
     const r = refund('2026-11-18T11:00:00Z', a, [rline(a.lines[0], 1)], 'credit');
     const rows = customerRows([receipt(a, 'Ahmed'), receipt(b, 'Ahmed Benani'), receipt(x, 'Ahmed'), receipt(anon)], [r]);
     expect(rows).toEqual([{ customer_id: c1, name: 'Ahmed Benani', purchases: 2, net: 1500, credit: 750, last: '2026-11-18T09:00:00Z' }]);
+    // Un règlement reçu sur ce poste diminue le reste dû (contrat 0.8).
+    expect(customerRows([receipt(a, 'Ahmed')], [r], [{ customer_id: c1, amount: 500 }, { customer_id: 'autre', amount: 9 }])[0].credit).toBe(250);
   });
 });
 

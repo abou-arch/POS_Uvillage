@@ -210,7 +210,22 @@ export function openDb(path) {
   const db = new DatabaseSync(path);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
   db.exec(SCHEMA);
+  migrate(db);
   return db;
+}
+
+/** Colonnes ajoutées après la création d'une base : ajoutées aussi aux bases existantes (data/pos.db). */
+function migrate(db) {
+  const columns = (table) => new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));
+  const add = (table, column, type) => { if (!columns(table).has(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`); };
+  // Contrat 0.8 : règlement d'une dette fait à la caisse, compté dans les attendus de sa session (§4, §9).
+  add('customer_payments', 'register_id', 'TEXT');
+  add('customer_payments', 'session_id', 'TEXT');
+  add('customer_payments', 'session_closed', 'INTEGER NOT NULL DEFAULT 0');
+  add('customer_payments', 'balance_exceeded', 'INTEGER NOT NULL DEFAULT 0');
+  db.exec('CREATE INDEX IF NOT EXISTS customer_payments_session ON customer_payments(session_id)');
+  // Contrat 0.8 : annulation demandée par un caissier, autorisée par un responsable (§5, §11).
+  add('sales', 'cancel_approved_by', 'TEXT');
 }
 
 /** Exécute fn dans une transaction : tout ou rien. */

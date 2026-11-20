@@ -6,7 +6,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 // STATE_FILE=… pour un essai sans toucher à l'état habituel.
 const FILE = process.env.STATE_FILE ?? new URL('./state.json', import.meta.url);
 
-export function loadState({ sales, cashSessions, cashMovements, refunds, customers, products }) {
+export function loadState({ sales, cashSessions, cashMovements, refunds, customerPayments, customers, products }) {
   if (!existsSync(FILE)) return;
   try {
     const saved = JSON.parse(readFileSync(FILE, 'utf8'));
@@ -14,6 +14,7 @@ export function loadState({ sales, cashSessions, cashMovements, refunds, custome
     for (const s of saved.cashSessions ?? []) cashSessions.set(s.id, s);
     for (const m of saved.cashMovements ?? []) cashMovements.set(m.id, m);
     for (const r of saved.refunds ?? []) refunds.set(r.id, r);
+    for (const p of saved.customerPayments ?? []) customerPayments.set(p.id, p);
     for (const c of saved.customers ?? []) if (!customers.some((x) => x.id === c.id)) customers.push(c);
     for (const p of saved.products ?? []) {
       const product = products.find((x) => x.id === p.id);
@@ -25,12 +26,13 @@ export function loadState({ sales, cashSessions, cashMovements, refunds, custome
   }
 }
 
-export function saveState({ sales, cashSessions, cashMovements, refunds, customers, products }) {
+export function saveState({ sales, cashSessions, cashMovements, refunds, customerPayments, customers, products }) {
   const data = {
     sales: [...sales.values()],
     cashSessions: [...cashSessions.values()],
     cashMovements: [...cashMovements.values()],
     refunds: [...refunds.values()],
+    customerPayments: [...customerPayments.values()],
     customers,
     products: products.map(({ id, stock_by_store, updated_at }) => ({ id, stock_by_store, updated_at })),
   };
