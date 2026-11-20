@@ -3,6 +3,11 @@
 
 const mad = new Intl.NumberFormat('fr-MA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
+/** 3, 'article' → « 3 articles » ; 0 et 1 restent au singulier, comme en français. */
+export function plural(n: number, one: string, many = `${one}s`): string {
+  return `${n.toLocaleString('fr-FR')} ${Math.abs(n) < 2 ? one : many}`
+}
+
 /** 1250 → « 12,50 DH ». */
 export function formatMad(cents: number): string {
   return `${mad.format(cents / 100)} DH`

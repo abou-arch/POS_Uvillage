@@ -4,6 +4,7 @@ import { api, ApiError } from '../api/client'
 import type { Category } from '../api/types'
 import { Button, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHeader, Panel } from '../components/ui'
 import { useApp, useLoad } from '../lib/hooks'
+import { plural } from '../lib/format'
 
 export function CategoriesPage() {
   return (
@@ -34,12 +35,12 @@ function Kind({ path, title, withAr }: { path: 'categories' | 'brands'; title: s
 
   return (
     <Panel title={title} actions={<Button small icon="plus" onClick={() => setEditing('new')}>Ajouter</Button>}>
-      {error ? <ErrorBox error={error} onRetry={reload} /> : !data ? loading && <Loading /> : data.length === 0 ? <Empty>Aucune.</Empty> : (
+      {error ? <ErrorBox error={error} onRetry={reload} /> : !data ? loading && <Loading /> : data.length === 0 ? <Empty>Aucune pour l’instant. Créez-en une avec « Ajouter ».</Empty> : (
         <ul className="list">
           {data.map((c) => (
             <li key={c.id}>
               <span className="grow">{c.name}{c.name_ar && <span className="muted" dir="rtl"> · {c.name_ar}</span>}
-                <span className="sub muted small"> · {c.product_count} article(s)</span></span>
+                <span className="sub muted small"> · {plural(c.product_count, 'article')}</span></span>
               <Button small variant="ghost" icon="edit" title="Modifier" onClick={() => setEditing(c)} />
               <Button small variant="ghost" icon="trash" title={c.product_count ? 'Utilisée par des articles' : 'Supprimer'}
                 disabled={c.product_count > 0} onClick={() => remove(c)} />

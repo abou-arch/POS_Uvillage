@@ -4,7 +4,7 @@ import { useState, type FormEvent } from 'react'
 import { api, ApiError } from '../api/client'
 import type { BarcodeRule, Register, Store } from '../api/types'
 import { Badge, Button, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHeader, Panel } from '../components/ui'
-import { centsToInput, formatMad, parseMad } from '../lib/format'
+import { centsToInput, formatMad, parseMad, plural } from '../lib/format'
 import { useApp, useLoad } from '../lib/hooks'
 
 export function StoresPage() {
@@ -19,9 +19,9 @@ export function StoresPage() {
       <PageHeader title="Magasins et caisses" subtitle="Les caisses reçoivent ces réglages à la connexion." actions={
         <Button icon="plus" variant="primary" onClick={() => setEditing('new')}>Nouveau magasin</Button>
       } />
-      <p className="notice"><Icon name="info" />Adresses, ICE et format de la balance sont des valeurs provisoires : à remplacer par celles du client.</p>
+      <p className="notice"><Icon name="info" />Adresses, ICE et format de la balance sont des valeurs de démonstration : remplacez-les par les vôtres.</p>
       {error ? <ErrorBox error={error} onRetry={reload} /> : null}
-      {!data ? loading && <Loading /> : data.length === 0 ? <Empty>Aucun magasin.</Empty> : (
+      {!data ? loading && <Loading /> : data.length === 0 ? <Empty>Aucun magasin. Créez le premier avec « Nouveau magasin ».</Empty> : (
         <div className="grid">
           {data.map((s) => (
             <Panel key={s.id} title={s.name} actions={<>
@@ -48,7 +48,7 @@ export function StoresPage() {
               <div className="panel-head"><h2>Balance</h2><div className="spacer" /><Button small icon="edit" onClick={() => setRules(s)}>Règles</Button></div>
               <ul className="list">
                 {(s.barcode_rules ?? []).length === 0 ? <li className="muted">Pas de balance.</li> : s.barcode_rules!.map((r) => (
-                  <li key={r.prefix}><Badge tone="blue">{r.prefix}</Badge><span className="grow">{r.type === 'weight' ? 'Poids' : 'Prix'} : {r.integer_digits} chiffre(s) + {r.decimal_digits} décimale(s)</span></li>
+                  <li key={r.prefix}><Badge tone="blue">{r.prefix}</Badge><span className="grow">{r.type === 'weight' ? 'Poids' : 'Prix'} : {plural(r.integer_digits, 'chiffre')} + {plural(r.decimal_digits, 'décimale')}</span></li>
                 ))}
               </ul>
             </Panel>
@@ -175,7 +175,7 @@ function RulesForm({ store, onClose, onSaved }: { store: Store; onClose: () => v
       <Button onClick={onClose}>Annuler</Button>
       <Button variant="primary" busy={busy} onClick={submit}>Enregistrer</Button>
     </>}>
-      <p className="muted">Codes EAN-13 imprimés par la balance : préfixe, code article, valeur (poids en kg ou prix en DH), chiffre de contrôle. Format exact à demander au client (§8 point 12).</p>
+      <p className="muted">La balance imprime des codes EAN-13 : préfixe, code article, valeur (poids en kg ou prix en DH) et chiffre de contrôle. Relevez le format exact sur une étiquette de votre balance.</p>
       {rules.length === 0 ? <Empty>Aucune règle : le magasin n’a pas de balance.</Empty> : (
         <div className="table-wrap">
           <table className="lines-editor">
@@ -188,7 +188,7 @@ function RulesForm({ store, onClose, onSaved }: { store: Store; onClose: () => v
                     <option value="weight">Poids (kg)</option><option value="price">Prix (DH)</option></select></td>
                   <td><select value={r.integer_digits} onChange={(e) => update(i, { integer_digits: Number(e.target.value) })}>{digits(6).map((n) => <option key={n}>{n}</option>)}</select></td>
                   <td><select value={r.decimal_digits} onChange={(e) => update(i, { decimal_digits: Number(e.target.value) })}>{digits(r.type === 'price' ? 2 : 3).map((n) => <option key={n}>{n}</option>)}</select></td>
-                  <td className="muted">{Math.max(0, 12 - r.prefix.length - r.integer_digits - r.decimal_digits)} chiffre(s)</td>
+                  <td className="muted">{plural(Math.max(0, 12 - r.prefix.length - r.integer_digits - r.decimal_digits), 'chiffre')}</td>
                   <td><Button small variant="ghost" icon="trash" title="Retirer" onClick={() => setRules((rs) => rs.filter((_, j) => j !== i))} /></td>
                 </tr>
               ))}

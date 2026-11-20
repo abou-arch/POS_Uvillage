@@ -5,7 +5,7 @@ import { MOVE_LABELS, type MoveKind, type Product, type StockMove } from '../api
 import { PAGE_SIZE } from '../components/Pager'
 import { PeriodPicker } from '../components/PeriodPicker'
 import { Badge, Button, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHeader, Panel, SearchInput } from '../components/ui'
-import { formatDateTime, formatQuantity, parseMad, parseQuantity } from '../lib/format'
+import { formatDateTime, formatQuantity, parseMad, parseQuantity, plural } from '../lib/format'
 import { useApp, useLoad } from '../lib/hooks'
 import { periodRange } from '../lib/period'
 
@@ -105,7 +105,7 @@ function MoveForm({ kind, onClose, onSaved }: { kind: Kind; onClose: () => void;
         store_id: store, kind, note: note.trim() || null,
         lines: lines.map((l, i) => ({ product_id: l.product.id, quantity: parsed[i].quantity, ...(kind === 'receipt' && parsed[i].cost !== null ? { unit_cost: parsed[i].cost } : {}) })),
       })
-      notify(`${info.label} enregistrée : ${lines.length} article(s).`)
+      notify(`${info.label} enregistrée pour ${plural(lines.length, 'article')}.`)
       onSaved()
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Enregistrement impossible.')
@@ -145,7 +145,7 @@ function MoveForm({ kind, onClose, onSaved }: { kind: Kind; onClose: () => void;
           ))}
         </ul>
       )}
-      {lines.length === 0 ? <Empty>Aucun article ajouté.</Empty> : (
+      {lines.length === 0 ? <Empty>Cherchez un article ci-dessus pour l’ajouter.</Empty> : (
         <div className="table-wrap">
           <table className="lines-editor">
             <thead><tr><th>Article</th><th className="num">Stock actuel</th>

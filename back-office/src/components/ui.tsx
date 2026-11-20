@@ -1,5 +1,5 @@
 // Briques d'interface du back-office : icônes, boutons, fenêtres, champs, états de chargement.
-import { useEffect, useId, useRef, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 
 const PATHS = {
   dashboard: 'M3 13h8V3H3zM13 21h8V11h-8zM3 21h8v-6H3zM13 3v6h8V3z',
@@ -67,12 +67,27 @@ export function Button({ children, icon, variant = 'default', small, type = 'but
   )
 }
 
-/** Fenêtre modale (dialog natif : focus gardé, Échap pour fermer). */
+/** Durée de sortie d'une fenêtre (--dur-exit), 0 si l'utilisateur a demandé de réduire les animations. */
+function exitDelay(el: Element) {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return 0
+  return parseFloat(getComputedStyle(el).getPropertyValue('--dur-exit')) || 0
+}
+
+/** Fenêtre modale (dialog natif : focus gardé, Échap pour fermer ; courte sortie quand l'utilisateur la ferme). */
 export function Modal({ title, onClose, children, footer, wide }: {
   title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean
 }) {
   const ref = useRef<HTMLDialogElement>(null)
   const titleId = useId()
+  const [closing, setClosing] = useState(false)
+  function close() {
+    const d = ref.current
+    if (closing) return
+    const wait = d ? exitDelay(d) : 0
+    if (!wait) { onClose(); return }
+    setClosing(true)
+    window.setTimeout(onClose, wait)
+  }
   useEffect(() => {
     const d = ref.current
     if (!d || d.open) return
@@ -81,11 +96,11 @@ export function Modal({ title, onClose, children, footer, wide }: {
     d.querySelector<HTMLElement>('.modal-body input:not([type="hidden"]):not([disabled]), .modal-body select:not([disabled]), .modal-body textarea')?.focus()
   }, [])
   return (
-    <dialog ref={ref} className={`modal${wide ? ' wide' : ''}`} aria-labelledby={titleId}
-      onCancel={(e) => { e.preventDefault(); onClose() }}>
+    <dialog ref={ref} className={`modal${wide ? ' wide' : ''}${closing ? ' closing' : ''}`} aria-labelledby={titleId}
+      onCancel={(e) => { e.preventDefault(); close() }}>
       <header>
         <h2 id={titleId}>{title}</h2>
-        <Button icon="x" variant="ghost" small title="Fermer" onClick={onClose} />
+        <Button icon="x" variant="ghost" small title="Fermer" onClick={close} />
       </header>
       <div className="modal-body">{children}</div>
       {footer && <footer>{footer}</footer>}

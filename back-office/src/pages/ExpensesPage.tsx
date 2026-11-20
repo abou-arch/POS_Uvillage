@@ -7,7 +7,7 @@ import { EXPENSE_COLORS } from '../lib/charts'
 import { PeriodPicker } from '../components/PeriodPicker'
 import { Button, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHeader, Panel, Stat } from '../components/ui'
 import { csvMad, downloadCsv, toCsv } from '../lib/csv'
-import { formatDay, formatMad, parseMad } from '../lib/format'
+import { formatDay, formatMad, parseMad, plural } from '../lib/format'
 import { useApp, useLoad } from '../lib/hooks'
 import { dayIn, periodLabel, periodRange } from '../lib/period'
 
@@ -56,7 +56,7 @@ export function ExpensesPage() {
         <>
           <div className="grid">
             <div className="stats one">
-              <Stat label="Total des dépenses" value={formatMad(data.total)} tone={data.total ? 'red' : undefined} hint={`${data.items.length} dépense(s)`} />
+              <Stat label="Total des dépenses" value={formatMad(data.total)} tone={data.total ? 'red' : undefined} hint={plural(data.items.length, 'dépense')} />
               <Stat label="Plus grosse catégorie" value={data.by_category[0] ? EXPENSE_LABELS[data.by_category[0].category] : '—'}
                 hint={data.by_category[0] ? formatMad(data.by_category[0].amount) : undefined} />
             </div>

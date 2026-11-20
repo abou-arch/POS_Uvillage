@@ -1,8 +1,11 @@
 // Graphiques sans bibliothèque : colonnes et barres horizontales en HTML/CSS ; barres groupées, courbe, résultat
 // signé et anneau en SVG dessiné à la main (calculs dans lib/charts.ts, testés).
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { arcs, foldSlices, niceScale, ringPath, signedScale, type Slice } from '../lib/charts'
 import { formatMad } from '../lib/format'
+
+/** Rang d'une barre : décale son apparition de --stagger (styles.css). */
+const order = (i: number) => ({ '--i': i }) as CSSProperties
 
 export interface Column { key: string; label: string; value: number; secondary?: number; title?: string }
 
@@ -16,8 +19,8 @@ export function Columns({ data, legend }: { data: Column[]; legend?: [string, st
         {data.map((d, i) => (
           <div key={d.key} className="col" title={d.title ?? `${d.label} : ${formatMad(d.value)}`}>
             <div className="bars">
-              <span className="bar main" style={{ height: `${(d.value / max) * 100}%` }} />
-              {d.secondary ? <span className="bar secondary" style={{ height: `${(d.secondary / max) * 100}%` }} /> : null}
+              <span className="bar main" style={{ height: `${(d.value / max) * 100}%`, ...order(i) }} />
+              {d.secondary ? <span className="bar secondary" style={{ height: `${(d.secondary / max) * 100}%`, ...order(i) }} /> : null}
             </div>
             <span className="col-label">{i % every === 0 ? d.label : ''}</span>
           </div>
@@ -40,13 +43,13 @@ export function HBars({ data, empty = 'Aucune donnée' }: { data: HBar[]; empty?
   const max = Math.max(1, ...data.map((d) => Math.abs(d.value)))
   return (
     <ul className="hbars">
-      {data.map((d) => (
+      {data.map((d, i) => (
         <li key={d.key}>
           <div className="hbar-text">
             <span className="hbar-label">{d.label}{d.sub && <small className="muted"> · {d.sub}</small>}</span>
             <strong>{d.display ?? formatMad(d.value)}</strong>
           </div>
-          <div className="hbar-track"><span style={{ width: `${(Math.max(0, d.value) / max) * 100}%` }} /></div>
+          <div className="hbar-track"><span style={{ width: `${(Math.max(0, d.value) / max) * 100}%`, ...order(i) }} /></div>
         </li>
       ))}
     </ul>
@@ -73,13 +76,17 @@ function useWidth(initial = 600) {
 
 interface Tip { x: number; y: number; title: string; rows: { color?: string; label: string; value: string }[] }
 
+/** Info-bulle : la dernière reste affichée le temps de sa sortie (--dur-exit), puis s'efface sans être démontée. */
 function Tooltip({ tip, width }: { tip: Tip | null; width: number }) {
-  if (!tip) return null
-  const left = Math.min(Math.max(tip.x, 90), width - 90)
+  const [last, setLast] = useState<Tip | null>(null)
+  if (tip && tip !== last) setLast(tip)
+  const shown = tip ?? last
+  if (!shown) return null
+  const left = Math.min(Math.max(shown.x, 90), width - 90)
   return (
-    <div className="chart-tip" style={{ left, top: tip.y }} role="status">
-      <strong>{tip.title}</strong>
-      {tip.rows.map((r) => (
+    <div className={tip ? 'chart-tip' : 'chart-tip out'} style={{ left, top: shown.y }} role="status" aria-hidden={!tip}>
+      <strong>{shown.title}</strong>
+      {shown.rows.map((r) => (
         <span key={r.label} className="chart-tip-row">{r.color && <i style={{ background: r.color }} />}{r.label}<b>{r.value}</b></span>
       ))}
     </div>
@@ -150,7 +157,7 @@ export function GroupedBars({ labels, titles, series, format, axisFormat, height
           return (
             <g key={l + i}>
               {active === i && <rect className="hover-band" x={PAD.left + band * i} y={PAD.top} width={band} height={plotH} />}
-              {series.map((s, j) => <path key={s.key} d={barPath(x0 + j * (barW + gap), barW, y(0), y(s.values[i]))} fill={s.color} />)}
+              {series.map((s, j) => <path key={s.key} className="bar" style={order(i)} d={barPath(x0 + j * (barW + gap), barW, y(0), y(s.values[i]))} fill={s.color} />)}
               {i % every === 0 && <text className="x-label" x={PAD.left + band * (i + 0.5)} y={height - 8} textAnchor="middle">{l}</text>}
               <rect className="hit" x={PAD.left + band * i} y={PAD.top} width={band} height={plotH + PAD.bottom}
                 onMouseEnter={() => setActive(i)} onClick={() => setActive(i)} />
@@ -190,7 +197,7 @@ export function SignedBars({ labels, titles, values, format, axisFormat, height 
         {labels.map((l, i) => (
           <g key={l + i}>
             {active === i && <rect className="hover-band" x={PAD.left + band * i} y={PAD.top} width={band} height={plotH} />}
-            <path d={barPath(PAD.left + band * i + (band - barW) / 2, barW, y(0), y(values[i]))} fill={colorOf(values[i])} />
+            <path className={values[i] < 0 ? 'bar neg' : 'bar'} style={order(i)} d={barPath(PAD.left + band * i + (band - barW) / 2, barW, y(0), y(values[i]))} fill={colorOf(values[i])} />
             {i % every === 0 && <text className="x-label" x={PAD.left + band * (i + 0.5)} y={height - 8} textAnchor="middle">{l}</text>}
             <rect className="hit" x={PAD.left + band * i} y={PAD.top} width={band} height={plotH + PAD.bottom}
               onMouseEnter={() => setActive(i)} onClick={() => setActive(i)} />
@@ -231,8 +238,10 @@ export function AreaLine({ labels, titles, values, color = 'var(--s1)', format, 
         onMouseMove={(e) => pick(e.clientX, e.currentTarget.getBoundingClientRect())}
         onClick={(e) => pick(e.clientX, e.currentTarget.getBoundingClientRect())}>
         <YAxis ticks={scale.ticks} y={y} width={width} format={axisFormat} />
-        <path d={area} fill={color} opacity={0.12} />
-        <path d={line} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+        <g className="plot-fade">
+          <path d={area} fill={color} opacity={0.12} />
+          <path d={line} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+        </g>
         {labels.map((l, i) => {
           const last = i === n - 1
           if (!(last || (i % every === 0 && n - 1 - i >= every / 2))) return null
@@ -269,10 +278,10 @@ export function Donut({ slices, format, label, centerLabel = 'Total', colors }: 
   const color = (s: Slice, i: number) => (s.key === '__others' ? 'var(--faint)' : colors?.[s.key] ?? SLICE_COLORS[i % SLICE_COLORS.length])
   const shown = parts.find((s) => s.key === active)
   return (
-    <div className="donut">
+    <div className={active ? 'donut focus' : 'donut'}>
       <svg viewBox="0 0 160 160" width="160" height="160" role="img" aria-label={label} onMouseLeave={() => setActive(null)}>
         {parts.map((s, i) => (
-          <path key={s.key} d={ringPath(80, 80, active === s.key ? 78 : 74, 50, angles[i].start, angles[i].end)} fill={color(s, i)}
+          <path key={s.key} className={active === s.key ? 'on' : undefined} d={ringPath(80, 80, 76, 50, angles[i].start, angles[i].end)} fill={color(s, i)}
             onMouseEnter={() => setActive(s.key)} onClick={() => setActive(s.key)}>
             <title>{`${s.label} : ${format(s.value)} (${Math.round(angles[i].share * 100)} %)`}</title>
           </path>

@@ -5,7 +5,7 @@ import { api, ApiError, qs } from '../api/client'
 import { MOVE_LABELS, type Category, type Product, type StockMove, type Unit } from '../api/types'
 import { Badge, Button, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHeader, Panel, SearchInput } from '../components/ui'
 import { csvMad, downloadCsv, toCsv } from '../lib/csv'
-import { centsToInput, formatDateTime, formatMad, formatQuantity, parseMad } from '../lib/format'
+import { centsToInput, formatDateTime, formatMad, formatQuantity, parseMad, plural } from '../lib/format'
 import { go, useApp, useDebounced, useLoad } from '../lib/hooks'
 
 type Status = 'all' | 'active' | 'inactive' | 'low'
@@ -37,7 +37,7 @@ export function ProductsPage() {
 
   return (
     <>
-      <PageHeader title="Articles" subtitle={`${rows.length} article(s)${storeId ? ` · stock de ${me.stores.find((s) => s.id === storeId)?.name}` : ' · stock de tous les magasins'}`}
+      <PageHeader title="Articles" subtitle={`${plural(rows.length, 'article')}${storeId ? ` · stock de ${me.stores.find((s) => s.id === storeId)?.name}` : ' · stock de tous les magasins'}`}
         actions={<>
           <Button icon="download" disabled={!rows.length} onClick={exportCsv}>Exporter</Button>
           <Button icon="plus" variant="primary" onClick={() => setCreating(true)}>Nouvel article</Button>
@@ -56,7 +56,7 @@ export function ProductsPage() {
       </div>
       {error ? <ErrorBox error={error} onRetry={reload} /> : null}
       <Panel>
-        {!data ? loading && <Loading /> : rows.length === 0 ? <Empty>Aucun article.</Empty> : (
+        {!data ? loading && <Loading /> : rows.length === 0 ? <Empty>Aucun article trouvé.</Empty> : (
           <div className="table-wrap">
             <table>
               <thead><tr>
@@ -237,7 +237,7 @@ export function ProductForm({ product, onClose, onSaved }: { product?: Product; 
         <Field label="Prix d’achat (DH, facultatif)" hint="Sert au calcul de la marge." error={f.cost.trim() && cost === null ? 'Montant invalide' : null}>
           <input value={f.cost} inputMode="decimal" onChange={(e) => set('cost')(e.target.value)} placeholder="0,00" />
         </Field>
-        <Field label="TVA" hint="Taux des réglages (à confirmer avec le comptable).">
+        <Field label="TVA" hint="Taux définis dans les réglages.">
           <select value={f.tva_rate} onChange={(e) => set('tva_rate')(e.target.value)}>
             {rates.map((r) => <option key={r} value={r}>{r} %</option>)}
           </select>

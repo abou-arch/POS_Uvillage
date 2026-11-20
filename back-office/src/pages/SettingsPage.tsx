@@ -34,8 +34,8 @@ export function SettingsPage() {
       <PageHeader title="Réglages" />
       <form onSubmit={submit} className="grid">
         <Panel title="Taux de TVA">
-          <div className="panel-body" style={{ display: 'grid', gap: 12 }}>
-            <p className="notice"><Icon name="info" />Liste provisoire (20, 14, 10, 7, 0 %) : à confirmer avec le comptable du client (§8 point 2).</p>
+          <div className="panel-body" style={{ display: 'grid', gap: 'var(--sp-3)' }}>
+            <p className="notice"><Icon name="info" />Liste provisoire (20, 14, 10, 7, 0 %) : faites-la valider par votre comptable.</p>
             <div className="checks">
               {rates.map((r) => (
                 <Badge key={r} tone="blue">{r} %

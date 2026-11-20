@@ -8,7 +8,7 @@ import { AreaLine, Donut, GroupedBars, HBars, SignedBars } from '../components/c
 import { PeriodPicker } from '../components/PeriodPicker'
 import { Badge, Button, Empty, ErrorBox, Icon, Loading, PageHeader, Panel, Stat, type IconName } from '../components/ui'
 import { compactMad, EXPENSE_COLORS, METHOD_COLORS, monthLabel } from '../lib/charts'
-import { formatDateTime, formatDay, formatMad, formatQuantity, variation } from '../lib/format'
+import { formatDateTime, formatDay, formatMad, formatQuantity, plural, variation } from '../lib/format'
 import { useApp, useLoad } from '../lib/hooks'
 import { periodLabel, periodRange } from '../lib/period'
 const SERIES = { sales: { label: 'Ventes', color: 'var(--s1)' }, purchases: { label: 'Achats', color: 'var(--s2)' }, expenses: { label: 'Dépenses', color: 'var(--s3)' } }
@@ -36,22 +36,25 @@ export function DashboardPage() {
   )
 }
 
-function IconTile({ icon, color, label, value, href }: { icon: IconName; color: string; label: string; value: string; href?: string }) {
+/** Famille d'une tuile : sa couleur vient de styles.css (classes .fam-*). */
+type Family = 'buy' | 'due' | 'sales' | 'expenses' | 'customers' | 'suppliers' | 'invoices' | 'tickets'
+
+function IconTile({ icon, family, label, value, href }: { icon: IconName; family: Family; label: string; value: string; href?: string }) {
   const body = (
     <>
-      <span className="tile-icon" style={{ background: color }}><Icon name={icon} size={30} /></span>
+      <span className="tile-icon"><Icon name={icon} size={20} /></span>
       <span className="tile-body"><span className="tile-label">{label}</span><strong className="tile-value" title={value}>{value}</strong></span>
     </>
   )
-  return href ? <a className="tile" href={href}>{body}</a> : <div className="tile">{body}</div>
+  return href ? <a className={`tile fam-${family}`} href={href}>{body}</a> : <div className={`tile fam-${family}`}>{body}</div>
 }
 
-function CountTile({ icon, color, label, value, href }: { icon: IconName; color: string; label: string; value: number; href: string }) {
+function CountTile({ icon, family, label, value, href, more }: { icon: IconName; family: Family; label: string; value: number; href: string; more: string }) {
   return (
-    <a className="count-tile" href={href} style={{ background: color }}>
-      <span className="count-body"><strong>{value.toLocaleString('fr-FR')}</strong><span>{label}</span></span>
-      <span className="count-icon"><Icon name={icon} size={56} /></span>
-      <footer>Voir <Icon name="arrowRight" size={14} /></footer>
+    <a className={`count-tile fam-${family}`} href={href}>
+      <span className="count-head"><span>{label}</span><Icon name={icon} size={18} /></span>
+      <strong>{value.toLocaleString('fr-FR')}</strong>
+      <span className="count-link">{more}<Icon name="arrowRight" size={14} /></span>
     </a>
   )
 }
@@ -83,23 +86,25 @@ function DashboardBody({ d, timeZone, multiStore, periodText, onYear }: {
 
   return (
     <>
+      <h2 className="section-title">Depuis le début</h2>
       <div className="tiles">
-        <IconTile icon="bag" color="var(--t-cyan)" label="Total des achats dus" value={formatMad(o.totals.purchases_due)} href="#/achats" />
-        <IconTile icon="coins" color="var(--t-orange)" label="Total des ventes dues" value={formatMad(o.totals.sales_due)} href="#/clients" />
-        <IconTile icon="cart" color="var(--t-green)" label="Montant total des ventes" value={formatMad(o.totals.sales)} href="#/ventes" />
-        <IconTile icon="minus" color="var(--t-red)" label="Montant total des dépenses" value={formatMad(o.totals.expenses)} href="#/depenses" />
+        <IconTile icon="bag" family="buy" label="Achats à payer" value={formatMad(o.totals.purchases_due)} href="#/achats" />
+        <IconTile icon="wallet" family="due" label="Crédit clients à encaisser" value={formatMad(o.totals.sales_due)} href="#/clients" />
+        <IconTile icon="cart" family="sales" label="Ventes nettes" value={formatMad(o.totals.sales)} href="#/ventes" />
+        <IconTile icon="minus" family="expenses" label="Dépenses" value={formatMad(o.totals.expenses)} href="#/depenses" />
+      </div>
+      <h2 className="section-title">Aujourd’hui</h2>
+      <div className="tiles">
+        <IconTile icon="bag" family="buy" label="Achats facturés" value={formatMad(o.today_totals.purchases)} />
+        <IconTile icon="wallet" family="due" label="Argent encaissé" value={formatMad(o.today_totals.received)} />
+        <IconTile icon="cart" family="sales" label="Ventes nettes" value={formatMad(o.today_totals.sales)} />
+        <IconTile icon="minus" family="expenses" label="Dépenses" value={formatMad(o.today_totals.expenses)} />
       </div>
       <div className="tiles">
-        <IconTile icon="bag" color="var(--t-cyan)" label="Achat total d’aujourd’hui" value={formatMad(o.today_totals.purchases)} />
-        <IconTile icon="coins" color="var(--t-orange)" label="Paiements reçus aujourd’hui" value={formatMad(o.today_totals.received)} />
-        <IconTile icon="cart" color="var(--t-green)" label="Ventes totales d’aujourd’hui" value={formatMad(o.today_totals.sales)} />
-        <IconTile icon="minus" color="var(--t-red)" label="Dépense totale d’aujourd’hui" value={formatMad(o.today_totals.expenses)} />
-      </div>
-      <div className="tiles">
-        <CountTile icon="users" color="var(--t-pink)" label="Clients" value={o.counts.customers} href="#/clients" />
-        <CountTile icon="truck" color="var(--t-purple)" label="Fournisseurs" value={o.counts.suppliers} href="#/fournisseurs" />
-        <CountTile icon="invoice" color="var(--t-blue)" label="Factures d’achat" value={o.counts.purchases} href="#/achats" />
-        <CountTile icon="receipt" color="var(--t-teal)" label="Factures de vente" value={o.counts.sales} href="#/ventes" />
+        <CountTile icon="users" family="customers" label="Clients" value={o.counts.customers} href="#/clients" more="Voir les clients" />
+        <CountTile icon="truck" family="suppliers" label="Fournisseurs" value={o.counts.suppliers} href="#/fournisseurs" more="Voir les fournisseurs" />
+        <CountTile icon="invoice" family="invoices" label="Factures d’achat" value={o.counts.purchases} href="#/achats" more="Voir les factures" />
+        <CountTile icon="receipt" family="tickets" label="Tickets de vente" value={o.counts.sales} href="#/ventes" more="Voir les ventes" />
       </div>
 
       <div className="grid split">
@@ -132,7 +137,7 @@ function DashboardBody({ d, timeZone, multiStore, periodText, onYear }: {
 
       <div className="grid split">
         <Panel title={`Résultat par mois (ventes − achats − dépenses), ${o.monthly.year}`}>
-          {yearEmpty ? <Empty>Rien à calculer pour {o.monthly.year}.</Empty> : (
+          {yearEmpty ? <Empty>Aucun mouvement en {o.monthly.year}.</Empty> : (
             <SignedBars label={`Résultat mensuel ${o.monthly.year}`} labels={monthLabels} titles={monthTitles} values={result}
               format={formatMad} axisFormat={compactMad} positive="Excédent" negative="Déficit" />
           )}
@@ -161,13 +166,13 @@ function DashboardBody({ d, timeZone, multiStore, periodText, onYear }: {
               labels={Array.from({ length: 24 }, (_, h) => `${h}h`)}
               titles={Array.from({ length: 24 }, (_, h) => {
                 const x = d.report.by_hour.find((r) => r.hour === h)
-                return `${h}h – ${h + 1}h · ${x?.sales_count ?? 0} ticket(s)`
+                return `${h}h – ${h + 1}h · ${plural(x?.sales_count ?? 0, 'ticket')}`
               })}
               values={Array.from({ length: 24 }, (_, h) => d.report.by_hour.find((r) => r.hour === h)?.sales_ttc ?? 0)} />
           ) : (
             <AreaLine label="Ventes TTC par jour" seriesLabel="Ventes TTC" format={formatMad} axisFormat={compactMad}
               labels={days.map((x) => formatDay(x.day).slice(0, 5))}
-              titles={days.map((x) => `${formatDay(x.day)} · ${x.sales_count} ticket(s)${x.refunds_ttc ? ` · retours ${formatMad(x.refunds_ttc)}` : ''}`)}
+              titles={days.map((x) => `${formatDay(x.day)} · ${plural(x.sales_count, 'ticket')}${x.refunds_ttc ? ` · retours ${formatMad(x.refunds_ttc)}` : ''}`)}
               values={days.map((x) => x.sales_ttc)} />
           )}
         </Panel>
@@ -188,11 +193,11 @@ function DashboardBody({ d, timeZone, multiStore, periodText, onYear }: {
         </Panel>
         {multiStore ? (
           <Panel title="Par magasin">
-            <HBars data={d.report.by_store.map((x) => ({ key: x.store_id, label: x.name, value: x.sales_ttc - x.refunds_ttc, sub: `${x.sales_count} ticket(s)` }))} />
+            <HBars data={d.report.by_store.map((x) => ({ key: x.store_id, label: x.name, value: x.sales_ttc - x.refunds_ttc, sub: plural(x.sales_count, 'ticket') }))} />
           </Panel>
         ) : (
           <Panel title="Par caissier">
-            <HBars data={d.report.by_cashier.map((x) => ({ key: x.user_id, label: x.name, value: x.sales_ttc, sub: `${x.sales_count} ticket(s)` }))} empty="Aucune vente." />
+            <HBars data={d.report.by_cashier.map((x) => ({ key: x.user_id, label: x.name, value: x.sales_ttc, sub: plural(x.sales_count, 'ticket') }))} empty="Aucune vente." />
           </Panel>
         )}
       </div>
@@ -267,7 +272,7 @@ function YearSummary({ totals }: { totals: { sales: number; purchases: number; e
         {row('Dépenses', totals.expenses, SERIES.expenses.color)}
         {row(<strong>Résultat</strong>, result)}
       </ul>
-      <p className="muted small panel-body">Indicatif : ventes TTC moins achats facturés et dépenses saisies. Le stock acheté et non vendu n’est pas compté à part.</p>
+      <p className="muted small panel-body">Résultat indicatif : ventes TTC moins achats facturés et dépenses saisies. Les achats sont déduits en entier, même si la marchandise n’est pas encore vendue.</p>
     </>
   )
 }

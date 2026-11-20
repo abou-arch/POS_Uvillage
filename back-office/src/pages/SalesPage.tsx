@@ -6,7 +6,7 @@ import { PAGE_SIZE, Pager } from '../components/Pager'
 import { PeriodPicker } from '../components/PeriodPicker'
 import { Badge, Button, Empty, ErrorBox, Icon, Loading, Modal, PageHeader, Panel, SearchInput } from '../components/ui'
 import { csvMad, downloadCsv, toCsv } from '../lib/csv'
-import { formatDateTime, formatMad, formatQuantity } from '../lib/format'
+import { formatDateTime, formatMad, formatQuantity, plural } from '../lib/format'
 import { go, useApp, useDebounced, useLoad } from '../lib/hooks'
 import { periodRange } from '../lib/period'
 
@@ -70,7 +70,7 @@ export function SalesPage() {
                   {data.rows.map((s) => <SaleTr key={s.id} s={s} timeZone={timeZone} />)}
                 </tbody>
                 <tfoot><tr>
-                  <td colSpan={5}>{data.total.toLocaleString('fr-FR')} vente(s) · hors annulées</td>
+                  <td colSpan={5}>{plural(data.total, 'vente')}, annulées non comptées</td>
                   <td className="num">{formatMad(data.sums.ttc)}</td><td className="num">{formatMad(data.sums.paid)}</td>
                   <td className="num">{formatMad(data.sums.due)}</td><td />
                 </tr></tfoot>

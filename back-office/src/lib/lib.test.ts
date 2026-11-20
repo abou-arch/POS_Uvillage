@@ -1,7 +1,17 @@
 import { describe, expect, test } from 'vitest'
 import { csvMad, toCsv } from './csv'
-import { centsToInput, formatMad, parseMad, parseQuantity, variation } from './format'
+import { centsToInput, formatMad, parseMad, parseQuantity, plural, variation } from './format'
 import { addDays, customPeriod, dayIn, dayStart, periodQuery, presetPeriod } from './period'
+
+describe('plural', () => {
+  test('0 et 1 au singulier, sinon le pluriel', () => {
+    expect(plural(0, 'article')).toBe('0 article')
+    expect(plural(1, 'retour')).toBe('1 retour')
+    expect(plural(2, 'vente')).toBe('2 ventes')
+    expect(plural(1200, 'ticket')).toBe('1 200 tickets')
+    expect(plural(3, 'chiffre', 'chiffres')).toBe('3 chiffres')
+  })
+})
 
 describe('montants', () => {
   test('saisie lue comme du texte, jamais par calcul flottant', () => {

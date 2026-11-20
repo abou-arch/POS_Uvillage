@@ -117,7 +117,7 @@ function UserForm({ user, onClose, onSaved }: { user: AdminUser | null; onClose:
         )}
         {role !== 'cashier' && (
           <Field label={user?.has_pin ? 'Nouveau PIN (facultatif)' : 'PIN d’autorisation'} error={pinProblem}
-            hint="6 chiffres, tapés en caisse pour autoriser une remise, un retour, un écart (§11). Différent du mot de passe.">
+            hint="6 chiffres, à taper en caisse pour autoriser une remise, un retour ou un écart. Différent du mot de passe.">
             <input type="password" inputMode="numeric" autoComplete="off" maxLength={6} value={pin} disabled={removePin} onChange={(e) => setPin(e.target.value)} />
           </Field>
         )}

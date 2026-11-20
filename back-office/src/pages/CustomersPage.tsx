@@ -4,7 +4,7 @@ import { api, ApiError, qs } from '../api/client'
 import { METHOD_LABELS, type Customer, type CustomerDetail } from '../api/types'
 import { Badge, Button, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHeader, Panel, SearchInput, Stat } from '../components/ui'
 import { csvMad, downloadCsv, toCsv } from '../lib/csv'
-import { formatDateTime, formatMad, parseMad } from '../lib/format'
+import { formatDateTime, formatMad, parseMad, plural } from '../lib/format'
 import { go, useApp, useDebounced, useLoad } from '../lib/hooks'
 import { SaleTr } from './SalesPage'
 
@@ -24,7 +24,7 @@ export function CustomersPage() {
 
   return (
     <>
-      <PageHeader title="Clients" subtitle={data ? `${data.length} client(s) · reste dû ${formatMad(totalDue)}` : undefined} actions={<>
+      <PageHeader title="Clients" subtitle={data ? `${plural(data.length, 'client')} · reste dû ${formatMad(totalDue)}` : undefined} actions={<>
         <Button icon="download" disabled={!data?.length} onClick={exportCsv}>Exporter</Button>
         <Button icon="plus" variant="primary" onClick={() => setCreating(true)}>Nouveau client</Button>
       </>} />
@@ -37,7 +37,7 @@ export function CustomersPage() {
       </div>
       {error ? <ErrorBox error={error} onRetry={reload} /> : null}
       <Panel>
-        {!data ? loading && <Loading /> : data.length === 0 ? <Empty>Aucun client.</Empty> : (
+        {!data ? loading && <Loading /> : data.length === 0 ? <Empty>Aucun client trouvé.</Empty> : (
           <div className="table-wrap">
             <table>
               <thead><tr><th>Nom</th><th>Téléphone</th><th>Matricule</th><th className="num">Achats</th><th className="num">Total acheté</th><th>Dernier achat</th><th className="num">Reste dû</th></tr></thead>
@@ -77,14 +77,14 @@ export function CustomerPage({ id }: { id: string }) {
           <Button icon="edit" onClick={() => setEditing(true)}>Modifier</Button>
           <Button icon="wallet" variant="primary" disabled={data.balance <= 0} onClick={() => setPaying(true)}>Encaisser un règlement</Button>
         </>} />
-      {data.balance < 0 && <p className="notice"><Icon name="info" />Le client a un avoir de {formatMad(-data.balance)} (retour à crédit après règlement de sa dette, §8 point 9 à trancher).</p>}
+      {data.balance < 0 && <p className="notice"><Icon name="info" />Ce client a un avoir de {formatMad(-data.balance)} : un article a été rendu à crédit après qu’il a réglé sa dette.</p>}
       <div className="stats">
         <Stat label="Reste dû" value={formatMad(Math.max(0, data.balance))} tone={data.balance > 0 ? 'amber' : 'green'} />
         <Stat label="Achats" value={data.sales.filter((s) => s.status === 'completed').length} hint={formatMad(bought)} />
         <Stat label="Règlements" value={data.payments.length} hint={formatMad(data.payments.reduce((n, p) => n + p.amount, 0))} />
       </div>
       <Panel title="Achats">
-        {data.sales.length === 0 ? <Empty>Aucun achat.</Empty> : (
+        {data.sales.length === 0 ? <Empty>Ce client n’a encore rien acheté.</Empty> : (
           <div className="table-wrap">
             <table>
               <thead><tr><th>Ticket</th><th>Date</th><th>Magasin</th><th>Caissier</th><th>Client</th><th className="num">Total</th><th className="num">Payé</th><th className="num">Dû</th><th>Statut</th></tr></thead>
@@ -94,7 +94,7 @@ export function CustomerPage({ id }: { id: string }) {
         )}
       </Panel>
       <Panel title="Règlements reçus">
-        {data.payments.length === 0 ? <Empty>Aucun règlement.</Empty> : (
+        {data.payments.length === 0 ? <Empty>Aucun règlement reçu.</Empty> : (
           <ul className="list">
             {data.payments.map((p) => (
               <li key={p.id}>

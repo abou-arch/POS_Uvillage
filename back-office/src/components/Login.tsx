@@ -38,7 +38,7 @@ export function Login({ onLogged }: { onLogged: () => void }) {
         <div className="card-head">
           <span className="logo big"><Icon name="chart" size={28} /></span>
           <h1>Gestion</h1>
-          <p className="muted">Catalogue, stock, ventes, clients et rapports des magasins.</p>
+          <p className="muted">Espace des responsables et administrateurs. Les caissiers se connectent sur la caisse.</p>
         </div>
         <label className="form-field">
           <span className="label">Identifiant</span>

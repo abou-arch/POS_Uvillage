@@ -6,7 +6,7 @@ import { METHOD_LABELS, type Report } from '../api/types'
 import { PeriodPicker } from '../components/PeriodPicker'
 import { Button, Empty, ErrorBox, Loading, PageHeader, Panel, Stat } from '../components/ui'
 import { csvMad, downloadCsv, toCsv, type Cell } from '../lib/csv'
-import { formatDay, formatMad, formatQuantity } from '../lib/format'
+import { formatDay, formatMad, formatQuantity, plural } from '../lib/format'
 import { useApp, useLoad } from '../lib/hooks'
 import { periodLabel, periodRange } from '../lib/period'
 
@@ -36,8 +36,8 @@ function Body({ r, file }: { r: Report; file: (name: string) => string }) {
   return (
     <>
       <div className="stats">
-        <Stat label="Ventes TTC" value={formatMad(s.sales_ttc)} hint={`${s.sales_count} ticket(s) · panier moyen ${formatMad(s.average_basket)}`} />
-        <Stat label="Retours" value={formatMad(s.refunds_ttc)} tone={s.refunds_ttc ? 'red' : undefined} hint={`${s.refunds_count} retour(s)`} />
+        <Stat label="Ventes TTC" value={formatMad(s.sales_ttc)} hint={`${plural(s.sales_count, 'ticket')} · panier moyen ${formatMad(s.average_basket)}`} />
+        <Stat label="Retours" value={formatMad(s.refunds_ttc)} tone={s.refunds_ttc ? 'red' : undefined} hint={plural(s.refunds_count, 'retour')} />
         <Stat label="Net TTC" value={formatMad(s.net_ttc)} hint={`HT ${formatMad(s.net_ht)} · TVA ${formatMad(s.net_tva)}`} />
         <Stat label="Remises accordées" value={formatMad(s.discounts)} />
         <Stat label="Vendu à crédit" value={formatMad(s.credit_given)} tone={s.credit_given ? 'amber' : undefined} />

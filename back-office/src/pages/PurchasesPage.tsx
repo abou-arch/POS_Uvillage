@@ -7,7 +7,7 @@ import { PAGE_SIZE, Pager } from '../components/Pager'
 import { PeriodPicker } from '../components/PeriodPicker'
 import { Badge, Button, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHeader, Panel, SearchInput, Stat } from '../components/ui'
 import { csvMad, downloadCsv, toCsv } from '../lib/csv'
-import { centsToInput, formatDateTime, formatDay, formatMad, formatQuantity, parseMad, parseQuantity } from '../lib/format'
+import { centsToInput, formatDateTime, formatDay, formatMad, formatQuantity, parseMad, parseQuantity, plural } from '../lib/format'
 import { go, useApp, useDebounced, useLoad } from '../lib/hooks'
 import { dayIn, periodRange } from '../lib/period'
 import { dueAfter, lineTotal, purchaseTotal } from '../lib/purchase'
@@ -98,7 +98,7 @@ export function PurchasePage({ id }: { id: string }) {
         subtitle={<><a href={`#/fournisseurs/${p.supplier_id}`}>{p.supplier_name}</a> · {formatDay(p.invoice_date)} · {p.store_name}{p.invoice_ref ? ` · réf. ${p.invoice_ref}` : ''}</>}
         actions={<Button icon="wallet" variant="primary" disabled={p.due <= 0} onClick={() => setPaying(true)}>Enregistrer un règlement</Button>} />
       <div className="stats">
-        <Stat label="Total" value={formatMad(p.total)} hint={`${data.lines.length} article(s)`} />
+        <Stat label="Total" value={formatMad(p.total)} hint={plural(data.lines.length, 'article')} />
         <Stat label="Réglé" value={formatMad(p.paid)} tone="green" />
         <Stat label="Reste dû" value={formatMad(p.due)} tone={p.due > 0 ? 'amber' : 'green'} />
       </div>
@@ -192,7 +192,7 @@ export function PurchaseForm({ supplierId, onClose, onSaved }: { supplierId?: st
         lines: lines.map((l, i) => ({ product_id: l.product.id, quantity: parsed[i].quantity, unit_cost: parsed[i].unitCost })),
         ...(paidCents ? { payment: { amount: paidCents, method } } : {}),
       })
-      notify(`Facture enregistrée : ${lines.length} article(s) entrés en stock.`)
+      notify(`Facture enregistrée. Stock mis à jour pour ${plural(lines.length, 'article')}.`)
       onSaved(purchaseId)
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Enregistrement impossible.')
@@ -234,7 +234,7 @@ export function PurchaseForm({ supplierId, onClose, onSaved }: { supplierId?: st
           ))}
         </ul>
       )}
-      {lines.length === 0 ? <Empty>Aucun article ajouté.</Empty> : (
+      {lines.length === 0 ? <Empty>Cherchez un article ci-dessus pour l’ajouter à la facture.</Empty> : (
         <div className="table-wrap">
           <table className="lines-editor">
             <thead><tr><th>Article</th><th>Quantité reçue</th><th>Prix d’achat unitaire (DH)</th><th className="num">Total</th><th /></tr></thead>

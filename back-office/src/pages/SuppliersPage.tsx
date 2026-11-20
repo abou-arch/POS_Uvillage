@@ -4,7 +4,7 @@ import { api, ApiError, qs } from '../api/client'
 import type { Supplier, SupplierDetail } from '../api/types'
 import { Badge, Button, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHeader, Panel, SearchInput, Stat } from '../components/ui'
 import { csvMad, downloadCsv, toCsv } from '../lib/csv'
-import { formatDay, formatMad } from '../lib/format'
+import { formatDay, formatMad, plural } from '../lib/format'
 import { go, useApp, useDebounced, useLoad } from '../lib/hooks'
 import { PurchaseForm, PurchaseTr } from './PurchasesPage'
 
@@ -24,7 +24,7 @@ export function SuppliersPage() {
 
   return (
     <>
-      <PageHeader title="Fournisseurs" subtitle={data ? `${data.length} fournisseur(s) · reste à payer ${formatMad(totalDue)}` : undefined} actions={<>
+      <PageHeader title="Fournisseurs" subtitle={data ? `${plural(data.length, 'fournisseur')} · reste à payer ${formatMad(totalDue)}` : undefined} actions={<>
         <Button icon="download" disabled={!data?.length} onClick={exportCsv}>Exporter</Button>
         <Button icon="plus" variant="primary" onClick={() => setCreating(true)}>Nouveau fournisseur</Button>
       </>} />
@@ -37,7 +37,7 @@ export function SuppliersPage() {
       </div>
       {error ? <ErrorBox error={error} onRetry={reload} /> : null}
       <Panel>
-        {!data ? loading && <Loading /> : data.length === 0 ? <Empty>Aucun fournisseur.</Empty> : (
+        {!data ? loading && <Loading /> : data.length === 0 ? <Empty>Aucun fournisseur trouvé.</Empty> : (
           <div className="table-wrap">
             <table>
               <thead><tr><th>Nom</th><th>Téléphone</th><th>ICE</th><th className="num">Factures</th><th className="num">Total acheté</th>
@@ -91,7 +91,7 @@ export function SupplierPage({ id }: { id: string }) {
         </Panel>
       )}
       <Panel title="Factures d’achat">
-        {data.purchases.length === 0 ? <Empty>Aucune facture.</Empty> : (
+        {data.purchases.length === 0 ? <Empty>Aucune facture d’achat pour ce fournisseur.</Empty> : (
           <div className="table-wrap">
             <table>
               <thead><tr><th>Facture</th><th>Date</th><th>Fournisseur</th><th>Magasin</th><th className="num">Total</th><th className="num">Réglé</th><th className="num">Reste dû</th></tr></thead>

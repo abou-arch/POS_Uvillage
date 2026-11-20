@@ -5,7 +5,7 @@ import { METHOD_LABELS, REASON_LABELS, type RefundRow } from '../api/types'
 import { PAGE_SIZE, Pager } from '../components/Pager'
 import { PeriodPicker } from '../components/PeriodPicker'
 import { Badge, Empty, ErrorBox, Icon, Loading, PageHeader, Panel } from '../components/ui'
-import { formatDateTime, formatMad } from '../lib/format'
+import { formatDateTime, formatMad, plural } from '../lib/format'
 import { useApp, useLoad } from '../lib/hooks'
 import { periodRange } from '../lib/period'
 
@@ -41,7 +41,7 @@ export function RefundsPage() {
                     </tr>
                   ))}
                 </tbody>
-                <tfoot><tr><td colSpan={8}>{data.total} retour(s)</td><td className="num">{formatMad(data.sums.ttc)}</td></tr></tfoot>
+                <tfoot><tr><td colSpan={8}>{plural(data.total, 'retour')}</td><td className="num">{formatMad(data.sums.ttc)}</td></tr></tfoot>
               </table>
             </div>
             <Pager offset={offset} total={data.total} onChange={setOffset} />
