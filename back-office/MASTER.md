@@ -125,3 +125,15 @@ animation de `width`, `height`, `top`, `left`. Seuls `opacity` et `transform` s'
 - **Badge** : coin `--r-full`, fond doux de sa famille, texte de la couleur forte.
 - **Lien** : `--accent`, souligné au survol.
 - **Ligne de tableau** : 36 px, filet `--line-soft` ; survol `--accent-soft` ; cliquable = curseur main.
+
+## Caisse (pos-caisse)
+
+Mêmes jetons, mêmes règles, avec ce qu'impose un écran tactile tenu par une caissière pressée :
+
+- Cibles de 44 px au moins (`--control` 44 px, `--control-sm` 36 px) au lieu de 34 et 32 px.
+- Vert foncé `--ok-strong` `#0f5c37` (survol du bouton « Espèces »), filets `--ok-line` `#b5dcc6`,
+  `--warn-line` `#f0d49b`, rouge foncé `--bad-strong` `#912018`.
+- Le total à payer est un aplat `--accent`, texte `--on-accent` (7,8:1).
+- `--dur-flash` 600 ms : une ligne ajoutée au panier ou un montant qui change s'allume en `--accent-soft`, puis s'éteint.
+- Seule boucle tolérée : le voyant de synchro clignote pendant un envoi (une attente, comme un chargement).
+- Retirés : onde au toucher, article qui vole vers le total, total qui défile, confettis, halos de fond.

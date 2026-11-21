@@ -1,5 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { prefersReducedMotion } from './fx';
+import { type ReactNode } from 'react';
 
 // Pictogrammes dessinés en SVG (pas de dépendance) : trait de 2 px, couleur du texte autour.
 const paths = {
@@ -65,24 +64,3 @@ export function Avatar({ name }: { name: string }) {
   return <span className="avatar" aria-hidden="true">{name.trim().charAt(0).toUpperCase()}</span>;
 }
 
-/** Montant qui défile jusqu'à sa nouvelle valeur (≈ 0,45 s), comme un compteur. Affichage seulement : la valeur
- *  finale est toujours exacte, et le système réglé sur « réduire les animations » l'affiche directement. */
-export function CountUp({ value, format }: { value: number; format: (n: number) => string }) {
-  const [shown, setShown] = useState(value);
-  const current = useRef(value); // valeur affichée : un nouveau changement repart d'ici, même en pleine animation
-  useEffect(() => {
-    const from = current.current;
-    if (from === value) return;
-    const duration = prefersReducedMotion() ? 0 : 450; // sans animation : la valeur finale dès l'image suivante
-    const start = performance.now();
-    let frame = requestAnimationFrame(function step(now) {
-      const t = duration === 0 ? 1 : Math.min(1, (now - start) / duration);
-      const v = Math.round(from + (value - from) * (1 - (1 - t) ** 3)); // entiers : des centimes, jamais de flottants
-      current.current = v;
-      setShown(v);
-      if (t < 1) frame = requestAnimationFrame(step);
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [value]);
-  return <>{format(shown)}</>;
-}

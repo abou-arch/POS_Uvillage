@@ -13,7 +13,7 @@ import { HoldModal } from './HoldModal';
 import { LastSalePanel } from './LastSalePanel';
 import { MultiPaymentModal } from './MultiPaymentModal';
 import { QuantityField } from './QuantityField';
-import { CountUp, Icon } from './ui';
+import { Icon } from './ui';
 
 interface Props {
   cart: CartState;
@@ -189,7 +189,7 @@ export function Cart({ cart, dispatch, products, categories, barcodeRules, onPic
         </div>
         <div className="total">
           <span className="label">Total à payer</span>
-          <strong className="amount"><CountUp value={totals.ttc} format={formatMad} /></strong>
+          <strong className="amount">{formatMad(totals.ttc)}</strong>
           <span className="details">{articles} article{articles > 1 ? 's' : ''} · HT {formatMad(totals.ht)} · TVA {formatMad(totals.tva)}</span>
         </div>
       </div>

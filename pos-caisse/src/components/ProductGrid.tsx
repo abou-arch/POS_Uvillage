@@ -2,7 +2,6 @@ import { useMemo, useState, type CSSProperties } from 'react';
 import { categoryHue, categoryPictogram } from '../lib/categoryLook';
 import { formatQuantity, unitPrice } from '../lib/units';
 import type { Brand, Category, Product } from '../types';
-import { flyToCart } from './fx';
 import { Icon } from './ui';
 
 interface Props {
@@ -64,11 +63,7 @@ export function ProductGrid({ products, categories, brands, onAdd }: Props) {
           const category = p.category_id ? categoryById.get(p.category_id) : undefined;
           return (
             <button key={p.id} type="button" className={`tile ${level}`} title={p.code}
-              onClick={(e) => {
-                // Au poids, le poids reste à saisir : l'article n'entre dans le panier qu'après.
-                if (p.unit !== 'kg') flyToCart(e.currentTarget.querySelector('.thumb'));
-                onAdd(p);
-              }}>
+              onClick={() => onAdd(p)}>
               <span className={`thumb ${p.category_id ? '' : 'plain'}`} style={hueStyle(p.category_id)}>
                 {p.image_url ? <img src={p.image_url} alt="" /> : <Icon name={categoryPictogram(category?.name)} size={30} />}
                 {p.unit === 'kg' && <span className="thumb-tag">kg</span>}

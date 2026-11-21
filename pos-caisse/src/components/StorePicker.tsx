@@ -21,11 +21,13 @@ export function StorePicker({ auth, onSelect, onLogout }: {
   return (
     <div className="auth-screen">
       <div className="card picker">
-        <ol className="steps">
-          <li className={store ? 'done' : 'current'}>Magasin</li>
-          <li className="sep" aria-hidden="true" />
-          <li className={store ? 'current' : ''}>Caisse</li>
-        </ol>
+        {auth.stores.length > 1 && (
+          <ol className="steps">
+            <li className={store ? 'done' : 'current'}>Magasin</li>
+            <li className="sep" aria-hidden="true" />
+            <li className={store ? 'current' : ''}>Caisse</li>
+          </ol>
+        )}
         {store ? (
           <>
             <div className="card-title">
