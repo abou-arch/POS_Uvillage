@@ -100,7 +100,7 @@ describe('ventes, tableau de bord, clients', () => {
     assert.equal(due.rows[0].customer_name, 'Ahmed');
     const detail = (await manager.get(`/admin/sales/${credit.id}`)).body;
     assert.equal(detail.sale.number, credit.number);
-    assert.equal(detail.store.name, 'Magasin quartier');
+    assert.equal(detail.store.name, 'Supérette');
   });
 
   test('tableau de bord : chiffre, moyens de paiement, alertes de stock, session ouverte', async () => {

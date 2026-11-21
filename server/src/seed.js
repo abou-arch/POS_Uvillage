@@ -23,12 +23,12 @@ export function seedAdmin(db, { username, password, name = 'Administrateur' }) {
 
 // Mentions du ticket par magasin : valeurs FICTIVES (comme pos-caisse/src/config/store.ts), à confirmer.
 const STORE_INFO = {
-  st_1: { address: '12, avenue Mohammed V\n20000 Casablanca', ice: '000000000000001' },
   st_2: { address: 'Résidence Al Amal, bloc B\n20250 Casablanca', ice: '000000000000002' },
 };
 
-export async function seedDemo(db, { pinIterations = PIN_ITERATIONS } = {}) {
-  const data = await import('../../pos-caisse/mock-api/data.js');
+/** `data` : jeu de données à charger à la place de celui de la démonstration (les tests en ajoutent un second magasin). */
+export async function seedDemo(db, { pinIterations = PIN_ITERATIONS, data: given } = {}) {
+  const data = given ?? await import('../../pos-caisse/mock-api/data.js');
   const now = nowIso();
   const stamp = stampNow();
   tx(db, () => {

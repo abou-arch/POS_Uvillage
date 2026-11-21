@@ -1,15 +1,31 @@
 // Serveur de test : base en mémoire avec les données de démonstration, sur un port libre.
+// La démonstration n'a qu'une supérette ; les tests y ajoutent un second magasin pour vérifier les règles entre magasins
+// (caisse d'un autre magasin refusée, magasin non autorisé…), que l'API garde.
 import { randomUUID } from 'node:crypto';
 import { createApp } from '../src/app.js';
 import { openDb } from '../src/db.js';
 import { seedDemo } from '../src/seed.js';
+import * as demo from '../../pos-caisse/mock-api/data.js';
 import { lineTotals, saleTotals } from '../../pos-caisse/src/lib/totals.js';
 
 const PIN_ITERATIONS = 1000; // 600 000 en vrai : trop lent pour les tests
 
+/** Démonstration + « Magasin test » (st_1, deux caisses), où l'administrateur et le responsable travaillent aussi. */
+export const testData = {
+  ...demo,
+  stores: [
+    { id: 'st_1', name: 'Magasin test', closing_difference_threshold: 2000, cashier_max_discount_percent: 10, cashier_max_discount: 5000,
+      registers: [{ id: 'reg_1', name: 'Caisse 1' }, { id: 'reg_2', name: 'Caisse 2' }] },
+    ...demo.stores,
+  ],
+  users: demo.users.map((u) => (['admin', 'manager'].includes(u.role) ? { ...u, store_ids: ['st_1', ...u.store_ids] } : u)),
+  products: demo.products.map((p) => ({ ...p, stock_by_store: { st_1: p.stock_by_store.st_2, st_2: Math.floor(p.stock_by_store.st_2 / 2) } })),
+  barcodeRules: { st_1: demo.barcodeRules.st_2, ...demo.barcodeRules },
+};
+
 export async function startServer() {
   const db = openDb(':memory:');
-  await seedDemo(db, { pinIterations: PIN_ITERATIONS });
+  await seedDemo(db, { pinIterations: PIN_ITERATIONS, data: testData });
   const server = createApp({ db, pinIterations: PIN_ITERATIONS }).listen(0, '127.0.0.1');
   await new Promise((ok) => server.once('listening', ok));
   const base = `http://127.0.0.1:${server.address().port}/api`;

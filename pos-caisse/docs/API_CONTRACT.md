@@ -73,7 +73,7 @@ Codes HTTP : `400` données invalides · `401` non connecté · `403` interdit �
   "stores": [
     {
       "id": "st_1",
-      "name": "Magasin centre",
+      "name": "Supérette",
       "closing_difference_threshold": 2000,
       "cashier_max_discount_percent": 10,
       "cashier_max_discount": 5000,

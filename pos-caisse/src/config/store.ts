@@ -4,8 +4,7 @@
 export interface StoreInfo { name: string; address: string[]; ice: string }
 
 export const STORE_INFO: Record<string, StoreInfo> = {
-  st_1: { name: 'Supérette Uvillage — Centre', address: ['12, avenue Mohammed V', '20000 Casablanca'], ice: '000000000000001' },
-  st_2: { name: 'Supérette Uvillage — Quartier', address: ['Résidence Al Amal, bloc B', '20250 Casablanca'], ice: '000000000000002' },
+  st_2: { name: 'Supérette', address: ['Résidence Al Amal, bloc B', '20250 Casablanca'], ice: '000000000000002' },
 };
 
 /** Magasin absent de la liste ci-dessus : le nom vient de la session, sans adresse ni ICE. */
