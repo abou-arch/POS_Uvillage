@@ -7,7 +7,7 @@ import { Modal } from './Modal';
 import { Icon } from './ui';
 
 interface Row { key: number; method: PaymentMethod; text: string }
-const METHODS: PaymentMethod[] = ['cash', 'card', 'mobile', 'credit'];
+const METHODS: PaymentMethod[] = ['cash', 'card', 'mobile', 'qr', 'credit'];
 
 /** Mode remboursement (§10) : moyens proposés, contrôle des montants, et crédit possible ou non. */
 export interface RefundMode {

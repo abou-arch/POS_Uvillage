@@ -35,7 +35,7 @@ export function SessionModal({
           <div><dt>Ventes</dt><dd>{salesCount} · {formatMad(salesTotal)}</dd></div>
           <div><dt>Retours</dt><dd>{refundsCount} · {signedMad(-refundsTotal)}</dd></div>
           {paymentsCount > 0 && <div><dt>Règlements clients</dt><dd>{paymentsCount} · {signedMad(paymentsTotal)}</dd></div>}
-          <div><dt>Carte · mobile attendus</dt><dd>{formatMad(expected.card)} · {formatMad(expected.mobile)}</dd></div>
+          <div><dt>Carte · mobile · QR attendus</dt><dd>{formatMad(expected.card)} · {formatMad(expected.mobile)} · {formatMad(expected.qr)}</dd></div>
           <div className="strong"><dt>Espèces attendues</dt><dd>{formatMad(expected.cash)}</dd></div>
         </dl>
         {sorted.length > 0 && (

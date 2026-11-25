@@ -13,6 +13,7 @@ const METHODS: { method: CountedMethod; hint: string }[] = [
   { method: 'cash', hint: 'Dans le tiroir' },
   { method: 'card', hint: 'Terminal de paiement' },
   { method: 'mobile', hint: 'Paiement mobile' },
+  { method: 'qr', hint: 'Scan du QR code' },
 ];
 
 /** Ce que le caissier a saisi, pour l'enregistrement (PosScreen). */

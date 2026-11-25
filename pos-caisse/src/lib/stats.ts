@@ -157,7 +157,7 @@ export function byDay(sales: Sale[], refunds: Refund[], period: Period, timeZone
   return [...rows.values()];
 }
 
-export const PAYMENT_ORDER: PaymentMethod[] = ['cash', 'card', 'mobile', 'credit'];
+export const PAYMENT_ORDER: PaymentMethod[] = ['cash', 'card', 'mobile', 'qr', 'credit'];
 
 /** Encaissé par moyen de paiement : paiements des ventes − remboursements des retours (espèces nettes du rendu). */
 export function byMethod(sales: Sale[], refunds: Refund[]): { method: PaymentMethod; amount: number }[] {
@@ -235,7 +235,7 @@ export function vatSummary(sales: Sale[], refunds: Refund[]): { rate: number; ht
 export type SaleFilter = 'all' | 'cancelled' | 'refunded' | PaymentMethod;
 
 export const SALE_FILTER_LABELS: Record<SaleFilter, string> = {
-  all: 'Toutes', cash: 'Espèces', card: 'Carte', mobile: 'Mobile', credit: 'Crédit', refunded: 'Avec retour', cancelled: 'Annulées',
+  all: 'Toutes', cash: 'Espèces', card: 'Carte', mobile: 'Mobile', qr: 'QR code', credit: 'Crédit', refunded: 'Avec retour', cancelled: 'Annulées',
 };
 
 /** Ventes qui correspondent au filtre. refundedIds : ventes qui ont au moins un retour. */

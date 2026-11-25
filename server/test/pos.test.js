@@ -300,3 +300,30 @@ describe('caissier (0.8) : annulation autorisée, règlement d’une dette', () 
     assert.equal(unknown.body.error.code, 'SESSION_UNKNOWN');
   });
 });
+
+describe('clients spéciaux et nouvel article depuis la caisse', () => {
+  test('un responsable crée un client avec une remise ; un caissier ne peut pas', async () => {
+    const owner = await srv.login('admin');
+    const res = await owner.post('/customers', { name: 'Client fidèle', phone: null, discount_percent: 10 });
+    assert.equal(res.status, 201);
+    assert.equal(res.body.discount_percent, 10);
+    const found = await owner.get('/customers?search=fid');
+    assert.equal(found.body.find((c) => c.id === res.body.id).discount_percent, 10);
+    const cashier = await srv.login('caissier');
+    assert.equal((await cashier.post('/customers', { name: 'Autre', discount_percent: 5 })).status, 403);
+    assert.equal((await cashier.post('/customers', { name: 'Autre' })).body.discount_percent, null);
+    assert.equal((await owner.post('/customers', { name: 'Trop', discount_percent: 150 })).status, 400);
+  });
+
+  test('un caissier crée un article : code IT suivant, stock 0, visible dans le catalogue', async () => {
+    const cashier = await srv.login('caissier');
+    const res = await cashier.post('/products', { store_id: 'st_2', name: 'Biscuit test', price_ttc: 350, tva_rate: 0, unit: 'unit', barcode: '6111234567890' });
+    assert.equal(res.status, 201);
+    assert.match(res.body.code, /^IT\d{4,}$/);
+    assert.equal(res.body.stock, 0);
+    const list = (await cashier.get('/products?store_id=st_2')).body;
+    assert.ok(list.some((p) => p.id === res.body.id));
+    assert.equal((await cashier.post('/products', { store_id: 'st_2', name: 'Doublon', price_ttc: 100, tva_rate: 0, unit: 'unit', barcode: '6111234567890' })).status, 409);
+    assert.equal((await cashier.post('/products', { store_id: 'st_1', name: 'Ailleurs', price_ttc: 100, tva_rate: 0, unit: 'unit' })).status, 403);
+  });
+});

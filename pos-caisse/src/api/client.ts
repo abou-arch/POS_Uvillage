@@ -3,6 +3,7 @@ import type {
   Auth, Brand, CashMovement, CashSession, CashSessionClosing, CashSessionOpening, Category, Customer, CustomerPayment, Product,
   Refund, Sale, SaleLookup,
 } from '../types';
+import type { NewProduct } from '../state/newProduct';
 
 const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:4000/api';
 const TIMEOUT_MS = 10_000; // la caisse ne doit pas rester bloquée quand le réseau ne répond plus
@@ -76,6 +77,8 @@ export const api = {
   brands: () => request<Brand[]>('/brands'),
   products: (storeId: string, updatedSince?: string) =>
     request<Product[]>(`/products?store_id=${encodeURIComponent(storeId)}${updatedSince ? `&updated_since=${encodeURIComponent(updatedSince)}` : ''}`),
+  /** Nouvel article créé à la caisse (contrat 0.9) : l'API donne le code IT suivant ; stock 0. */
+  createProduct: (p: NewProduct) => request<Product>('/products', { method: 'POST', body: JSON.stringify(p) }),
   customers: (search = '') => request<Customer[]>(`/customers?search=${encodeURIComponent(search)}`),
   createCustomer: (c: Omit<Customer, 'matricule'> & { matricule?: string | null }) =>
     request<Customer>('/customers', { method: 'POST', body: JSON.stringify(c) }),

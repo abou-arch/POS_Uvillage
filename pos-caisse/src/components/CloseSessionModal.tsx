@@ -31,13 +31,14 @@ export function CloseSessionModal({ expected, role, threshold, blocker, onShowHe
   const cash = useCashInput(edit);
   const [card, setCard] = useState(() => madInput(expected.card));
   const [mobile, setMobile] = useState(() => madInput(expected.mobile));
+  const [qr, setQr] = useState(() => madInput(expected.qr));
   const [note, setNote] = useState('');
   const [tried, setTried] = useState(false);
   const [saving, setSaving] = useState(false);
 
   // Carte et mobile : le total du terminal peut être négatif quand les retours de la session dépassent les ventes (§9).
   const read = (text: string) => (text.trim() === '' ? null : parseSignedMad(text));
-  const counted: Counted = { cash: cash.cents, card: read(card), mobile: read(mobile) };
+  const counted: Counted = { cash: cash.cents, card: read(card), mobile: read(mobile), qr: read(qr) };
   const counts = methodCounts(expected, counted);
   const gap = counts?.some((c) => c.difference !== 0) ?? false;
   // Au-delà du seuil : la clôture reste possible, un responsable l'autorise avec son PIN en la confirmant.
@@ -79,7 +80,7 @@ export function CloseSessionModal({ expected, role, threshold, blocker, onShowHe
     }
   }
 
-  const textOf: Record<Exclude<CountedMethod, 'cash'>, [string, (t: string) => void]> = { card: [card, setCard], mobile: [mobile, setMobile] };
+  const textOf: Record<Exclude<CountedMethod, 'cash'>, [string, (t: string) => void]> = { card: [card, setCard], mobile: [mobile, setMobile], qr: [qr, setQr] };
 
   const cell = (method: CountedMethod) => {
     if (method === 'cash') return counted.cash === null ? '—' : formatMad(counted.cash);
@@ -119,7 +120,7 @@ export function CloseSessionModal({ expected, role, threshold, blocker, onShowHe
             ))}
           </tbody>
         </table>
-        <p className="muted small">Carte et mobile : corrigez si le total du terminal est différent.</p>
+        <p className="muted small">Carte, mobile et QR code : corrigez si le total du terminal ou de l’application est différent.</p>
         <label>
           <span>Note de clôture <small>{gap ? '(obligatoire : il y a un écart)' : '(facultative)'}</small></span>
           <input value={note} maxLength={MAX_TEXT_LENGTH} autoComplete="off" placeholder={gap ? 'Expliquez l’écart' : ''}

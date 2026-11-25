@@ -2,7 +2,7 @@
 // après des PIN faux. Fonctions pures (le stockage est passé en paramètre) : tout est testé.
 import { browserStorage, isRecord, readJson, writeJson } from '../lib/storage';
 import type { MethodCount, Role } from '../types';
-import { lineGross, type CartState } from './cart';
+import { isSpecialCustomer, lineGross, type CartState } from './cart';
 
 /** Opérations qu'un caissier fait autoriser par un responsable (§11). */
 export type GuardedAction = 'discount' | 'refund' | 'cash_out' | 'closing' | 'delete_held' | 'cancel_sale';
@@ -40,7 +40,8 @@ export function discountsOverLimit(cart: CartState, limits: DiscountLimits): Dis
   const base = cart.lines.reduce((s, l) => s + lineGross(l) - l.discount, 0) + cart.otherCharges;
   return {
     lines: cart.lines.filter((l) => overDiscountLimit(l.discount, lineGross(l), limits)).map((l) => l.product_id),
-    global: overDiscountLimit(cart.globalDiscount, base, limits),
+    // La remise d'un client spécial a été fixée par le propriétaire : elle ne demande pas d'autorisation.
+    global: !isSpecialCustomer(cart.customer) && overDiscountLimit(cart.globalDiscount, base, limits),
   };
 }
 

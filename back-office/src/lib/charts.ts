@@ -7,7 +7,7 @@ export const EXPENSE_COLORS: Record<string, string> = {
   maintenance: 'var(--s7)', taxes: 'var(--s8)', other: 'var(--faint)',
 }
 /** Couleur fixe de chaque moyen de paiement. */
-export const METHOD_COLORS: Record<string, string> = { cash: 'var(--s1)', card: 'var(--s2)', mobile: 'var(--s3)', credit: 'var(--s4)' }
+export const METHOD_COLORS: Record<string, string> = { cash: 'var(--s1)', card: 'var(--s2)', mobile: 'var(--s3)', qr: 'var(--s5)', credit: 'var(--s4)' }
 
 /** Échelle verticale : maximum arrondi vers le haut (1, 2, 2,5 ou 5 × 10ⁿ) et graduations régulières depuis 0. */
 export function niceScale(max: number, steps = 4): { max: number; ticks: number[] } {

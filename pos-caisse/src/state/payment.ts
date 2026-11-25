@@ -5,7 +5,7 @@ import type { Payment, PaymentMethod } from '../types';
 export const QUICK_CASH = [1000, 2000, 5000, 10000, 20000]; // billets de 10 à 200 DH
 export const MAX_CHANGE = 100_000; // 1 000 DH à rendre : au-delà, c'est une faute de frappe
 
-export const METHOD_LABELS: Record<PaymentMethod, string> = { cash: 'Espèces', card: 'Carte', mobile: 'Mobile', credit: 'Crédit' };
+export const METHOD_LABELS: Record<PaymentMethod, string> = { cash: 'Espèces', card: 'Carte', mobile: 'Mobile', qr: 'QR code', credit: 'Crédit' };
 
 /** Espèces : le client donne au moins ce qu'il doit, et le rendu reste plausible. */
 export function cashError(due: number, received: number | null): string | null {

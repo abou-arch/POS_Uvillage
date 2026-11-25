@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildCustomer, MAX_MATRICULE_LENGTH, MAX_NAME_LENGTH, normalizePhone, prefillFrom } from './customers';
 
-const form = (f: Partial<{ name: string; phone: string; matricule: string }>) => ({ name: '', phone: '', matricule: '', ...f });
+const form = (f: Partial<{ name: string; phone: string; matricule: string; discount: string }>) => ({ name: '', phone: '', matricule: '', ...f });
 
 describe('téléphone', () => {
   it('met les numéros marocains au format +212', () => {
@@ -62,5 +62,22 @@ describe('pré-remplissage depuis la recherche', () => {
     expect(prefillFrom('2023 001 542')).toEqual({ matricule: '2023001542' });
     expect(prefillFrom(' Zineb ')).toEqual({ name: 'Zineb' });
     expect(prefillFrom('  ')).toEqual({});
+  });
+});
+
+describe('client spécial (contrat 0.9)', () => {
+  it('garde la remise en % entier, avec ou sans le signe %', () => {
+    const r = buildCustomer(form({ name: 'Fidèle', discount: '10 %' }), 'id1');
+    expect(r).toEqual({ ok: true, customer: { id: 'id1', name: 'Fidèle', phone: null, matricule: null, discount_percent: 10 } });
+  });
+  it('refuse une remise aberrante', () => {
+    for (const bad of ['', '0', '101', '12,5', 'dix', '-5']) {
+      const r = buildCustomer(form({ name: 'Fidèle', discount: bad }), 'id1');
+      expect(r.ok ? null : r.errors.discount).toMatch(/1 à 100/);
+    }
+  });
+  it('un client ordinaire n’a pas de remise', () => {
+    const r = buildCustomer(form({ name: 'Ahmed' }), 'id1');
+    expect(r.ok && 'discount_percent' in r.customer).toBe(false);
   });
 });

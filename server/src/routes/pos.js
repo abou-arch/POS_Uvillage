@@ -6,13 +6,17 @@ import { paidByLine, refundLine, saleTotals } from '../../../pos-caisse/src/lib/
 import {
   approvalWarning, customerBalance, isResponsible, moveStock, parseDoc, publicProduct, requireStore,
 } from '../core.js';
-import { all, get, nowIso, run, toMilli, tx } from '../db.js';
+import { all, get, nowIso, run, stampNow, toMilli, tx } from '../db.js';
+import { nextProductCode, productFields } from './admin.js';
+import { newId } from './common.js';
 import {
   body, clean, creditOf, fail, fitsUnit, isDate, isId, isInt, isNote, isOptId, isQuantity, isText, isUuid, METHODS, REASONS,
   round3, sumOf,
 } from '../validate.js';
 
-const COUNTED_METHODS = ['cash', 'card', 'mobile']; // le crédit n'est pas de l'argent reçu (§9)
+const COUNTED_METHODS = ['cash', 'card', 'mobile', 'qr'];
+// Une caisse pas encore mise à jour (ou une clôture en attente hors ligne) n'envoie pas de comptage QR.
+const REQUIRED_COUNTS = ['cash', 'card', 'mobile']; // le crédit n'est pas de l'argent reçu (§9)
 
 export function posRoutes(db) {
   const r = Router();
@@ -33,6 +37,21 @@ export function posRoutes(db) {
       LEFT JOIN stock s ON s.product_id = p.id AND s.store_id = ?
       WHERE (? IS NULL OR p.updated_at > ?) ORDER BY p.code`, storeId, since, since);
     res.json(rows.map(publicProduct));
+  });
+
+  // Nouvel article créé à la caisse (caissier compris) : même contrôle que le back-office, code IT suivant si absent.
+  r.post('/products', (req, res) => {
+    const b = req.body ?? {};
+    const storeId = String(b.store_id ?? '');
+    if (!storeId) fail(400, 'STORE_REQUIRED', 'store_id est obligatoire');
+    requireStore(req, storeId);
+    const fields = productFields(db, { ...b, code: b.code || nextProductCode(db) });
+    const id = newId('p');
+    run(db, `INSERT INTO products (id, code, barcode, name, name_ar, category_id, brand_id, price_ttc, cost_price, tva_rate, unit, image_url,
+      stock_alert, expiry_date, active, updated_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    id, fields.code, fields.barcode, fields.name, fields.name_ar, fields.category_id, fields.brand_id, fields.price_ttc, fields.cost_price,
+    fields.tva_rate, fields.unit, fields.image_url, fields.stock_alert, fields.expiry_date, 1, stampNow(), nowIso());
+    res.status(201).json(publicProduct({ ...get(db, 'SELECT * FROM products WHERE id = ?', id), stock: 0 }));
   });
 
   r.get('/stores/:id/approvers', (req, res) => {
@@ -58,7 +77,7 @@ export function posRoutes(db) {
     const like = `%${q.replace(/[%_]/g, '')}%`;
     const digits = q.replace(/\D/g, '');
     const local = /^0[5-7]/.test(digits) ? `212${digits.slice(1)}` : digits; // 06… retrouve +2126…
-    const rows = all(db, `SELECT id, name, phone, matricule FROM customers
+    const rows = all(db, `SELECT id, name, phone, matricule, discount_percent FROM customers
       WHERE lower(name) LIKE ? OR (? <> '' AND (replace(phone, '+', '') LIKE ? OR replace(phone, '+', '') LIKE ? OR matricule LIKE ?))
       ORDER BY name LIMIT 20`, like, digits, `%${digits}%`, `%${local}%`, `%${digits}%`);
     res.json(rows.map((c) => ({ ...c, balance: customerBalance(db, c.id) }))); // 0.8 : reste dû (§4)
@@ -67,13 +86,15 @@ export function posRoutes(db) {
   r.post('/customers', (req, res) => {
     const b = req.body ?? {};
     if (b.id !== undefined && !isUuid(b.id)) fail(400, 'INVALID_DATA', 'id invalide');
-    const known = b.id ? get(db, 'SELECT id, name, phone, matricule FROM customers WHERE id = ?', b.id) : null;
+    const known = b.id ? get(db, 'SELECT id, name, phone, matricule, discount_percent FROM customers WHERE id = ?', b.id) : null;
     if (known) return res.status(200).json({ ...known, balance: customerBalance(db, known.id) });
     const customer = customerFields(b);
+    // Client spécial : seul un responsable (le propriétaire) fixe une remise.
+    if (customer.discount_percent !== null && !isResponsible(req.user.role)) fail(403, 'FORBIDDEN', 'Seul un responsable crée un client spécial');
     const id = b.id ?? randomUUID();
     const now = nowIso();
-    run(db, 'INSERT INTO customers (id, name, phone, matricule, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-      id, customer.name, customer.phone, customer.matricule, now, now);
+    run(db, 'INSERT INTO customers (id, name, phone, matricule, discount_percent, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      id, customer.name, customer.phone, customer.matricule, customer.discount_percent, now, now);
     res.status(201).json({ id, ...customer, balance: 0 });
   });
 
@@ -333,10 +354,10 @@ export function posRoutes(db) {
   });
 
   const isAmount = (method, v) => (method === 'cash' ? isInt(v, 0) : Number.isSafeInteger(v));
-  const validCounts = (counts) => Array.isArray(counts) && counts.length === COUNTED_METHODS.length
+  const validCounts = (counts) => Array.isArray(counts) && new Set(counts.map((c) => c?.method)).size === counts.length
     && counts.every((c) => c && COUNTED_METHODS.includes(c.method) && isAmount(c.method, c.expected) && isAmount(c.method, c.counted)
       && Number.isInteger(c.difference))
-    && COUNTED_METHODS.every((m) => counts.some((c) => c.method === m));
+    && REQUIRED_COUNTS.every((m) => counts.some((c) => c.method === m));
   const validCashCount = (lines) => lines === null || lines === undefined || (Array.isArray(lines)
     && lines.every((l) => l && isInt(l.value, 1) && isInt(l.quantity, 0)) && new Set(lines.map((l) => l.value)).size === lines.length);
 
@@ -375,7 +396,10 @@ export function customerFields(b) {
   if (phone !== null && !/^\+?\d{6,15}$/.test(phone)) fail(400, 'INVALID_DATA', 'Téléphone invalide');
   const matricule = b.matricule === null || b.matricule === undefined || b.matricule === '' ? null : String(b.matricule).trim();
   if (matricule !== null && !/^\d{1,15}$/.test(matricule)) fail(400, 'INVALID_DATA', 'Matricule invalide : chiffres seulement, 15 au plus');
-  return { name, phone, matricule };
+  const d = b.discount_percent;
+  const discount_percent = d === null || d === undefined || d === '' || d === 0 ? null : d;
+  if (discount_percent !== null && !isInt(discount_percent, 1, 100)) fail(400, 'INVALID_DATA', 'Remise du client : 1 à 100 %');
+  return { name, phone, matricule, discount_percent };
 }
 
 const SESSION_FIELDS = ['id', 'store_id', 'register_id', 'status', 'opened_by', 'opened_at', 'opening_cash', 'opening_note',
@@ -391,7 +415,7 @@ export function publicSession(s) {
  * + règlements de dettes + entrées − sorties ; carte et mobile de même, sans les mouvements.
  */
 export function expectedByMethod(db, session) {
-  const expected = { cash: session.opening_cash, card: 0, mobile: 0 };
+  const expected = { cash: session.opening_cash, card: 0, mobile: 0, qr: 0 };
   for (const row of all(db, `SELECT doc FROM sales WHERE session_id = ? AND status = 'completed'`, session.id)) {
     for (const p of parseDoc(row).payments) if (p.method in expected) expected[p.method] += p.amount;
   }

@@ -68,7 +68,7 @@ describe('annulation d’une vente à la caisse (§5, contrat 0.8)', () => {
   it('une vente annulée ne compte ni dans les attendus ni dans le rapport : elle est seulement dénombrée', () => {
     const kept = sale([{ method: 'cash', amount: 2000 }]);
     const cancelled = { ...sale([{ method: 'card', amount: 2000 }]), status: 'cancelled' as const };
-    expect(expectedByMethod(10000, [kept, cancelled], [])).toEqual({ cash: 12000, card: 0, mobile: 0 });
+    expect(expectedByMethod(10000, [kept, cancelled], [])).toEqual({ cash: 12000, card: 0, mobile: 0, qr: 0 });
     const report = sessionReport({ opening_cash: 10000, counts: null }, [kept, cancelled], []);
     expect(report.salesCount).toBe(1);
     expect(report.totals.ttc).toBe(2000);

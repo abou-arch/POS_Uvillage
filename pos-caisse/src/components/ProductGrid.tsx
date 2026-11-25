@@ -9,6 +9,7 @@ interface Props {
   categories: Category[];
   brands: Brand[];
   onAdd: (p: Product) => void;
+  onNewProduct: () => void; // article absent du catalogue : le créer depuis la caisse
 }
 
 // Une teinte par catégorie (variable CSS --hue) : les familles d'articles se repèrent d'un coup d'œil.
@@ -17,7 +18,7 @@ const hueStyle = (categoryId: string | null) => {
   return hue === null ? undefined : ({ '--hue': hue } as CSSProperties);
 };
 
-export function ProductGrid({ products, categories, brands, onAdd }: Props) {
+export function ProductGrid({ products, categories, brands, onAdd, onNewProduct }: Props) {
   const [categoryId, setCategoryId] = useState('');
   const [brandId, setBrandId] = useState('');
   const [query, setQuery] = useState('');
@@ -44,6 +45,9 @@ export function ProductGrid({ products, categories, brands, onAdd }: Props) {
           <option value="">Toutes les marques</option>
           {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
         </select>
+        <button type="button" className="btn secondary new-product" onClick={onNewProduct} title="Créer un article absent du catalogue">
+          <Icon name="plus" size={16} />Nouvel article
+        </button>
       </div>
       <div className="chips" role="group" aria-label="Catégories">
         <button type="button" className={`chip ${categoryId === '' ? 'active' : ''}`}

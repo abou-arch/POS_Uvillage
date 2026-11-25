@@ -1,9 +1,14 @@
 # Contrat d'API — Caisse (POS) ↔ Application web
 
-Version 0.7, 0.8 proposée (caisse et back-office) — à valider par l’équipe.
+Version 0.7, 0.8 et 0.9 proposées (caisse et back-office) — à valider par l’équipe.
 
 Changements par version :
 
+- **0.9 (proposition)** : demandes du propriétaire de la supérette.
+  - §5 et §9 : nouveau moyen de paiement `qr` (le client scanne le QR code du magasin et paie). Compté à la clôture comme `card` et `mobile` ; une clôture sans comptage `qr` (caisse pas encore à jour) reste acceptée.
+  - §4 : client spécial. Champ `discount_percent` (1 à 100, ou `null`) : remise en % sur tous ses tickets. Seul un responsable crée un client avec une remise (`403` pour un caissier). La caisse l'applique en remise globale (`global_discount`), calculée sur les articles après leurs remises de ligne, hors `other_charges` ; elle ne demande pas de PIN.
+  - §3 : nouvelle route `POST /api/products` : un article créé à la caisse, caissier compris.
+  - §5 : `other_charges` sert aux frais supplémentaires ajoutés au ticket (livraison, sachet…), 1 000 DH au plus côté caisse.
 - **0.8 (proposition)** : le serveur de l'équipe (`server/`), son back-office, et trois fonctions de la caisse.
   - §2 : `POST /api/auth/logout` révoque le token.
   - §4 : reste dû (`balance`) de chaque client dans `GET /api/customers` et `POST /api/customers`. Nouvelle route `POST /api/customer-payments` : règlement d'une dette à la caisse.
@@ -138,6 +143,19 @@ Rôles attendus côté caisse : `admin`, `manager`, `cashier`. Un caissier ne vo
 - `stock` est en kg, 3 décimales au plus ;
 - `barcode` est son **code de base** : le code-barres de la balance avec des zéros à la place de la valeur (poids ou prix), et le chiffre de contrôle recalculé (voir ci-dessous). `null` si l'article ne passe pas par la balance.
 
+### `POST /api/products` (0.9)
+
+Article absent du catalogue, créé depuis la caisse (caissier compris). En ligne seulement.
+
+```json
+// Requête
+{ "store_id": "st_1", "name": "Biscuit chocolat", "price_ttc": 350, "barcode": "6111234567890", "category_id": "cat_1", "unit": "unit", "tva_rate": 0 }
+// Réponse 201 : l'article au format de GET /api/products, avec le code suivant (« IT0123 ») et "stock": 0
+```
+
+- `barcode` et `category_id` facultatifs (`null`). `code` facultatif : sans lui, l'API donne le code `IT` suivant.
+- `409 BARCODE_TAKEN` si le code-barres est déjà celui d'un autre article ; `403` si le magasin n'est pas celui de l'utilisateur.
+
 ### `GET /api/stores/{store_id}/barcode-rules`
 
 Règles des codes-barres imprimés par la balance du magasin. La caisse s'en sert pour lire le code d'un article pesé.
@@ -173,10 +191,11 @@ Les clients de l'université sont identifiés par leur **matricule** : chiffres 
 `search` porte sur le nom, le téléphone et le matricule.
 
 ```json
-[ { "id": "c_8", "name": "Ahmed", "phone": "+212600000000", "matricule": "2023001542", "balance": 4500 } ]
+[ { "id": "c_8", "name": "Ahmed", "phone": "+212600000000", "matricule": "2023001542", "balance": 4500, "discount_percent": null } ]
 ```
 
 - `balance` (0.8) : reste dû du client, en centimes, d'après ce que l'API a reçu = crédit des ventes non annulées (paiements `credit` et partie non payée) − crédit rendu par les retours − règlements. Négatif : le client a un avoir. Absent d'une API d'avant 0.8 : la caisse ne l'affiche pas.
+- `discount_percent` (0.9) : client spécial, remise en % (1 à 100) sur tous ses tickets ; `null` pour un client ordinaire.
 - Le « client de passage » n'est pas un client en base : la vente a simplement `customer_id: null`.
 
 ### `POST /api/customers`
@@ -186,6 +205,8 @@ Les clients de l'université sont identifiés par leur **matricule** : chiffres 
 { "id": "7f3c2a9e-1b4d-4c8e-9f21-3a5b6c7d8e9f", "name": "Nouveau client", "phone": "+212600000001", "matricule": "2024000187" }
 // Réponse 201 : le client créé (l'id envoyé par la caisse est conservé), avec "balance": 0
 ```
+
+- `discount_percent` (0.9) facultatif : seul un responsable (`admin`, `manager`) peut l'envoyer, sinon `403`.
 
 ### `POST /api/customer-payments` (0.8)
 
@@ -207,7 +228,7 @@ Règlement d'une dette (ventes à crédit) encaissé à la caisse, dans la sessi
 { "id": "5d1e8c2a-…", "status": "created", "balance": 2500, "session_closed": false, "balance_exceeded": false }
 ```
 
-- `method` : `cash`, `card` ou `mobile` (pas `credit`). `amount` > 0. `note` : texte de 200 caractères au plus, ou `null`.
+- `method` : `cash`, `card`, `mobile` ou `qr` (0.9) (pas `credit`). `amount` > 0. `note` : texte de 200 caractères au plus, ou `null`.
 - Idempotent par `id` : renvoyé, il donne `200` avec `status: "duplicate"` et le reste dû actuel.
 - `balance` : reste dû du client après ce règlement.
 - Session : mêmes règles qu'une vente (§5) : `422 SESSION_UNKNOWN`, `422 SESSION_MISMATCH` ; une session déjà clôturée n'empêche pas l'enregistrement (`session_closed: true`, signalé au back-office).
@@ -259,7 +280,7 @@ Crée une vente. **Idempotent** : si une vente avec le même `id` existe déjà,
 
 Règles :
 
-- `method` ∈ `cash`, `card`, `mobile`, `credit` (vente à crédit, alimente « ventes dues »).
+- `method` ∈ `cash`, `card`, `mobile`, `qr` (0.9, paiement par QR code), `credit` (vente à crédit, alimente « ventes dues »).
 - La somme des `payments` peut être inférieure au total uniquement si le reste est en `credit` et qu'un `customer_id` est renseigné.
 - L'API décrémente le stock du magasin `store_id`.
 - Une vente créée hors ligne peut arriver en retard. Si le stock devient négatif, l'API **accepte la vente** et la signale (`stock_warning: true`), au lieu de la refuser : la vente a déjà eu lieu.
@@ -518,7 +539,7 @@ Règles :
 
 - **Idempotent** : session déjà clôturée → `200` avec `"status": "duplicate"`, rien n'est modifié.
 - Session inconnue → `404 NOT_FOUND`.
-- `counts` : une entrée et une seule pour chacun des moyens `cash`, `card` et `mobile`. Les ventes à crédit n'y figurent pas : aucun argent n'a été reçu. Sinon `400`.
+- `counts` : une entrée et une seule pour chacun des moyens `cash`, `card`, `mobile` et `qr` (0.9 ; `qr` absent accepté). Les ventes à crédit n'y figurent pas : aucun argent n'a été reçu. Sinon `400`.
   - `expected` et `counted` sont des entiers ≥ 0 pour `cash`.
   - Pour `card` et `mobile`, ce sont des entiers qui peuvent être négatifs : une session peut rembourser par carte plus qu'elle n'a encaissé (§10), et le total du terminal est alors négatif.
 - `difference = counted − expected` pour chaque moyen : négatif = il manque de l'argent. Sinon `422 DIFFERENCE_MISMATCH`.
@@ -547,6 +568,7 @@ espèces : expected = opening_cash
                    + somme des mouvements "in" − somme des mouvements "out"
 carte   : expected = paiements "card" des ventes − remboursements "card" des retours + règlements "card" de la session
 mobile  : expected = paiements "mobile" des ventes − remboursements "mobile" des retours + règlements "mobile" de la session
+qr      : expected = même calcul avec les paiements "qr" (0.9)
 ```
 
 Les ventes annulées (§5) n'y comptent pas : l'argent a été rendu au client.
@@ -638,7 +660,7 @@ Règles :
   - Dans tous les cas, l'API refuse qu'une ligne rende au total plus que son payé (`422 TOTALS_MISMATCH`).
 - `totals` = somme des lignes. Même contrôle à 1 centime près.
 - `payments` : comment l'argent est rendu. La somme des `amount` (entiers > 0) est égale à `totals.ttc`. Sinon `400`.
-  - `method` ∈ `cash`, `card`, `mobile`, `credit`.
+  - `method` ∈ `cash`, `card`, `mobile`, `qr`, `credit`.
   - `credit` réduit ce que le client doit. Il n'est accepté que si la vente d'origine avait un paiement `credit`, et jusqu'à ce montant moins le crédit déjà remboursé sur cette vente. Sinon `422 CREDIT_EXCEEDED`.
   - La caisse propose par défaut :
     - d'abord la part à crédit de la vente qui n'a pas encore été remboursée ;

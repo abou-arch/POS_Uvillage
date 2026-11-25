@@ -3,15 +3,17 @@ import { categoryHue, categoryPictogram } from '../lib/categoryLook';
 import { lookupScan } from '../lib/scan';
 import { formatMad, lineTotals, saleTotals } from '../lib/totals.js';
 import { formatQuantity, lineUnit, unitPrice } from '../lib/units';
-import { articleCount, canSendSms, type CartAction, type CartState } from '../state/cart';
+import { articleCount, canSendSms, isSpecialCustomer, type CartAction, type CartState } from '../state/cart';
 import type { DiscountExcess } from '../state/permissions';
 import type { LastSale } from '../state/sales';
 import type { BarcodeRule, Category, Payment, Product } from '../types';
 import { CashModal } from './CashModal';
+import { ChargesModal } from './ChargesModal';
 import { CustomerPicker } from './CustomerPicker';
 import { HoldModal } from './HoldModal';
 import { LastSalePanel } from './LastSalePanel';
 import { MultiPaymentModal } from './MultiPaymentModal';
+import { QrPaymentModal } from './QrPaymentModal';
 import { QuantityField } from './QuantityField';
 import { Icon } from './ui';
 
@@ -26,12 +28,15 @@ interface Props {
   overLimit: DiscountExcess | null; // remises d'un caissier au-delà du plafond (§11) ; null : pas de plafond pour ce rôle
   onCheckout: (payments: Payment[], amountReceived: number) => void;
   onHold: (note: string) => void;
+  canAddSpecial: boolean; // un responsable (le propriétaire) crée les clients spéciaux
 }
 
-export function Cart({ cart, dispatch, products, categories, barcodeRules, onPick, lastSale, overLimit, onCheckout, onHold }: Props) {
+export function Cart({ cart, dispatch, products, categories, barcodeRules, onPick, lastSale, overLimit, onCheckout, onHold, canAddSpecial }: Props) {
+  const [editingCharges, setEditingCharges] = useState(false);
+  const special = isSpecialCustomer(cart.customer);
   const scanRef = useRef<HTMLInputElement>(null);
   const [scanError, setScanError] = useState<string | null>(null);
-  const [paying, setPaying] = useState<'cash' | 'multiple' | 'hold' | null>(null);
+  const [paying, setPaying] = useState<'cash' | 'qr' | 'multiple' | 'hold' | null>(null);
   const totals = saleTotals(cart.lines, cart.otherCharges, cart.globalDiscount);
   const articles = articleCount(cart.lines);
   const payable = cart.lines.length > 0 && totals.ttc > 0;
@@ -94,7 +99,7 @@ export function Cart({ cart, dispatch, products, categories, barcodeRules, onPic
           </div>
           {scanError && <p className="scan-error" role="alert">{scanError}</p>}
         </form>
-        <CustomerPicker customer={cart.customer} onDone={focusScan}
+        <CustomerPicker customer={cart.customer} onDone={focusScan} canAddSpecial={canAddSpecial}
           onChange={(customer) => dispatch({ type: 'setCustomer', customer })} />
       </div>
 
@@ -166,16 +171,16 @@ export function Cart({ cart, dispatch, products, categories, barcodeRules, onPic
 
       <div className="summary">
         <div className="adjust">
-          <label>Autres charges
+          <div className="charges">
+            <span>Frais supplémentaires</span>
+            <button type="button" className="btn secondary" onClick={() => setEditingCharges(true)}>
+              <Icon name="plus" size={16} />{cart.otherCharges > 0 ? formatMad(cart.otherCharges) : 'Ajouter des frais'}
+            </button>
+          </div>
+          <label>{special ? `Remise client spécial (${cart.customer?.discount_percent} %)` : 'Remise globale'}
             <span className="money">
-              <input type="number" min={0} step={0.5} value={cart.otherCharges / 100}
-                onChange={(e) => dispatch({ type: 'setOtherCharges', amount: Number(e.target.value) * 100 })} />
-              DH
-            </span>
-          </label>
-          <label>Remise globale
-            <span className="money">
-              <input type="number" min={0} step={0.5} value={cart.globalDiscount / 100}
+              <input type="number" min={0} step={0.5} value={cart.globalDiscount / 100} disabled={special}
+                title={special ? 'Remise fixée par le propriétaire pour ce client' : undefined}
                 onChange={(e) => dispatch({ type: 'setGlobalDiscount', amount: Number(e.target.value) * 100 })} />
               DH
             </span>
@@ -199,10 +204,13 @@ export function Cart({ cart, dispatch, products, categories, barcodeRules, onPic
         <button className="action hold" disabled={cart.lines.length === 0} onClick={() => setPaying('hold')}><strong><Icon name="pause" size={18} />Mise en attente</strong><small>Reprendre plus tard</small></button>
         {/* « Multiple » de Falcon POS : plusieurs moyens de paiement pour une vente. */}
         <button className="action multiple" disabled={!payable} onClick={() => setPaying('multiple')}>
-          <strong><Icon name="card" size={18} />Paiement mixte</strong><small>Carte, mobile, crédit…</small>
+          <strong><Icon name="card" size={18} />Paiement mixte</strong><small>Carte, mobile, QR, crédit…</small>
         </button>
         <button className="action cash" disabled={!payable} onClick={() => setPaying('cash')}>
           <strong><Icon name="cash" size={18} />Espèces</strong><small>Avec rendu de monnaie · F2</small>
+        </button>
+        <button className="action qr" disabled={!payable} onClick={() => setPaying('qr')}>
+          <strong><Icon name="qr" size={18} />QR code</strong><small>Le client scanne et paie</small>
         </button>
         {/* « Pay All » de Falcon POS : tout le total en espèces, sans fenêtre. */}
         <button className="action exact" disabled={!payable} onClick={payExact}>
@@ -212,6 +220,15 @@ export function Cart({ cart, dispatch, products, categories, barcodeRules, onPic
 
       {paying === 'cash' && (
         <CashModal total={totals.ttc} onPay={(received) => pay([{ method: 'cash', amount: totals.ttc }], received)}
+          onClose={() => { setPaying(null); focusScan(); }} />
+      )}
+      {editingCharges && (
+        <ChargesModal current={cart.otherCharges}
+          onSave={(cents) => { dispatch({ type: 'setOtherCharges', amount: cents }); setEditingCharges(false); focusScan(); }}
+          onClose={() => { setEditingCharges(false); focusScan(); }} />
+      )}
+      {paying === 'qr' && (
+        <QrPaymentModal total={totals.ttc} onPay={() => pay([{ method: 'qr', amount: totals.ttc }], 0)}
           onClose={() => { setPaying(null); focusScan(); }} />
       )}
       {paying === 'multiple' && (

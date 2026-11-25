@@ -2,10 +2,12 @@
 import { uuidv4 } from '../lib/uuid';
 import type { Customer } from '../types';
 
-export interface CustomerForm { name: string; phone: string; matricule: string }
+/** discount : remise en % d'un client spécial (contrat 0.9), tapée par un responsable ; absente pour un client ordinaire. */
+export interface CustomerForm { name: string; phone: string; matricule: string; discount?: string }
 export type CustomerErrors = Partial<Record<keyof CustomerForm, string>>;
 
 export const MAX_NAME_LENGTH = 80;
+export const MAX_DISCOUNT_PERCENT = 100;
 export const MAX_MATRICULE_LENGTH = 15; // 10 chiffres au plus en général : on garde de la marge
 
 /**
@@ -52,6 +54,16 @@ export function buildCustomer(form: CustomerForm, id: string = uuidv4()):
     errors.matricule = `Le matricule ne contient que des chiffres (${MAX_MATRICULE_LENGTH} au plus).`;
   }
 
+  // Client spécial : un pourcentage entier de 1 à 100 (« 10 », « 10 % »).
+  let discount_percent: number | undefined;
+  if (form.discount !== undefined) {
+    const t = form.discount.replace(/[\s%]/g, '');
+    const n = Number(t);
+    if (!/^\d+$/.test(t) || n < 1 || n > MAX_DISCOUNT_PERCENT) errors.discount = `Remise : un pourcentage entier de 1 à ${MAX_DISCOUNT_PERCENT}.`;
+    else discount_percent = n;
+  }
+
   if (Object.keys(errors).length > 0) return { ok: false, errors };
-  return { ok: true, customer: { id, name, phone, matricule: matricule || null } };
+  const customer: Customer = { id, name, phone, matricule: matricule || null };
+  return { ok: true, customer: discount_percent === undefined ? customer : { ...customer, discount_percent } };
 }

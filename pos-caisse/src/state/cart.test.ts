@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Customer, Product } from '../types';
-import { articleCount, canSendSms, cartReducer, emptyCart, quantityError, readQuantity, type CartAction, type CartState } from './cart';
+import { articleCount, canSendSms, cartReducer, chargesError, emptyCart, MAX_OTHER_CHARGES, quantityError, readQuantity, type CartAction, type CartState } from './cart';
 
 const product = (id: string, price_ttc: number): Product => ({
   id, code: id, barcode: null, name: id.toUpperCase(), name_ar: null, category_id: null, brand_id: null,
@@ -104,5 +104,45 @@ describe('quantités à la pièce et au poids (§1, contrat 0.7)', () => {
     const cart = run({ type: 'add', product: product('p1', 1000) }, { type: 'add', product: product('p1', 1000) },
       { type: 'add', product: olives, quantity: 0.375 });
     expect(articleCount(cart.lines)).toBe(3);
+  });
+});
+
+describe('client spécial (contrat 0.9)', () => {
+  const fidele: Customer = { id: 'c_9', name: 'Fidèle', phone: null, matricule: null, discount_percent: 10 };
+  it('applique son pourcentage aux articles, recalculé à chaque changement, hors frais', () => {
+    const cart = run(
+      { type: 'add', product: product('p1', 1000) },
+      { type: 'setCustomer', customer: fidele },
+      { type: 'add', product: product('p2', 555) },
+      { type: 'setOtherCharges', amount: 500 },
+    );
+    expect(cart.globalDiscount).toBe(156); // 10 % de 15,55 DH, arrondi au centime ; les 5 DH de frais n'y sont pas
+  });
+  it('compte les remises de ligne avant le pourcentage et ignore une remise globale tapée', () => {
+    const cart = run(
+      { type: 'setCustomer', customer: fidele },
+      { type: 'add', product: product('p1', 2000) },
+      { type: 'setDiscount', productId: 'p1', discount: 500 },
+      { type: 'setGlobalDiscount', amount: 1000 },
+    );
+    expect(cart.globalDiscount).toBe(150);
+  });
+  it('retirer le client spécial retire sa remise', () => {
+    const cart = run({ type: 'add', product: product('p1', 1000) }, { type: 'setCustomer', customer: fidele }, { type: 'setCustomer', customer: null });
+    expect(cart.globalDiscount).toBe(0);
+  });
+  it('un client ordinaire garde la remise globale tapée', () => {
+    const cart = run({ type: 'add', product: product('p1', 1000) }, { type: 'setGlobalDiscount', amount: 100 }, { type: 'setCustomer', customer: ahmed });
+    expect(cart.globalDiscount).toBe(100);
+  });
+});
+
+describe('frais supplémentaires', () => {
+  it('s’ajoutent au total ; aberrants refusés et plafonnés', () => {
+    expect(chargesError(500)).toBeNull();
+    expect(chargesError(0)).toBeNull(); // 0 retire les frais
+    expect(chargesError(null)).toMatch(/invalide/);
+    expect(chargesError(MAX_OTHER_CHARGES + 1)).toMatch(/au plus/);
+    expect(run({ type: 'setOtherCharges', amount: 5_000_000 }).otherCharges).toBe(MAX_OTHER_CHARGES);
   });
 });

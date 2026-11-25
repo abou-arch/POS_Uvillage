@@ -358,7 +358,8 @@ export function adminRoutes(db, { pinIterations = PIN_ITERATIONS } = {}) {
     matriculeFree(db, f.matricule);
     const id = randomUUID();
     const now = nowIso();
-    run(db, 'INSERT INTO customers (id, name, phone, matricule, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)', id, f.name, f.phone, f.matricule, now, now);
+    run(db, 'INSERT INTO customers (id, name, phone, matricule, discount_percent, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      id, f.name, f.phone, f.matricule, f.discount_percent, now, now);
     res.status(201).json(get(db, 'SELECT * FROM customers WHERE id = ?', id));
   });
 
@@ -366,7 +367,8 @@ export function adminRoutes(db, { pinIterations = PIN_ITERATIONS } = {}) {
     if (!get(db, 'SELECT id FROM customers WHERE id = ?', req.params.id)) fail(404, 'NOT_FOUND', 'Client introuvable');
     const f = customerFields(req.body ?? {});
     matriculeFree(db, f.matricule, req.params.id);
-    run(db, 'UPDATE customers SET name = ?, phone = ?, matricule = ?, updated_at = ? WHERE id = ?', f.name, f.phone, f.matricule, nowIso(), req.params.id);
+    run(db, 'UPDATE customers SET name = ?, phone = ?, matricule = ?, discount_percent = ?, updated_at = ? WHERE id = ?',
+      f.name, f.phone, f.matricule, f.discount_percent, nowIso(), req.params.id);
     res.json(get(db, 'SELECT * FROM customers WHERE id = ?', req.params.id));
   });
 
@@ -379,7 +381,7 @@ export function adminRoutes(db, { pinIterations = PIN_ITERATIONS } = {}) {
     if (!isUuid(id)) fail(400, 'INVALID_DATA', 'id invalide');
     const known = get(db, 'SELECT * FROM customer_payments WHERE id = ?', id);
     if (known) return res.json({ payment: known, balance: customerBalance(db, c.id), status: 'duplicate' });
-    if (!['cash', 'card', 'mobile'].includes(b.method) || !isInt(b.amount, 1, 1e10)) fail(400, 'INVALID_DATA', 'Moyen de paiement ou montant invalide');
+    if (!['cash', 'card', 'mobile', 'qr'].includes(b.method) || !isInt(b.amount, 1, 1e10)) fail(400, 'INVALID_DATA', 'Moyen de paiement ou montant invalide');
     requireStore(req, b.store_id);
     const balance = customerBalance(db, c.id);
     if (b.amount > balance) fail(422, 'PAYMENT_EXCEEDS_BALANCE', 'Le règlement dépasse le reste dû', { balance });
@@ -663,7 +665,13 @@ function matriculeFree(db, matricule, exceptId = '') {
   }
 }
 
-function productFields(db, b, exceptId = '') {
+/** Code du prochain article : IT suivi du plus grand numéro IT existant + 1 (IT0001, IT0002…), comme Falcon POS. */
+export function nextProductCode(db) {
+  const max = get(db, "SELECT MAX(CAST(substr(code, 3) AS INTEGER)) AS n FROM products WHERE code GLOB 'IT[0-9]*'").n ?? 0;
+  return 'IT' + String(max + 1).padStart(4, '0');
+}
+
+export function productFields(db, b, exceptId = '') {
   const code = clean(b.code, 30);
   if (!code) fail(400, 'CODE_REQUIRED', 'Le code article est obligatoire');
   if (get(db, 'SELECT id FROM products WHERE code = ? AND id <> ?', code, exceptId)) fail(409, 'CODE_TAKEN', 'Code article déjà utilisé');

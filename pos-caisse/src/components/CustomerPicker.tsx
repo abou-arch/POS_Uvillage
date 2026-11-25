@@ -14,13 +14,14 @@ type Option = { kind: 'customer'; customer: Customer } | { kind: 'create' };
 
 // Reste dû (contrat 0.8) : montré quand l'API l'a donné, pour que le caissier le voie avant une nouvelle vente à crédit.
 const details = (c: Customer) =>
-  [c.matricule && `Matricule ${c.matricule}`, c.phone ?? 'Sans téléphone', c.balance !== undefined && c.balance > 0 && `Doit ${formatMad(c.balance)}`]
+  [c.discount_percent && `Client spécial −${c.discount_percent} %`, c.matricule && `Matricule ${c.matricule}`, c.phone ?? 'Sans téléphone', c.balance !== undefined && c.balance > 0 && `Doit ${formatMad(c.balance)}`]
     .filter(Boolean).join(' · ');
 
 // Sélecteur de client comme dans Falcon POS : recherche avec suggestions, « + » pour créer,
 // « × » pour revenir au client de passage (customer = null).
-export function CustomerPicker({ customer, onChange, onDone }: {
+export function CustomerPicker({ customer, onChange, onDone, canAddSpecial = false }: {
   customer: Customer | null;
+  canAddSpecial?: boolean; // bouton « Client spécial » : réservé à un responsable (le propriétaire)
   onChange: (customer: Customer | null) => void;
   onDone: () => void; // rend la main à la douchette
 }) {
@@ -30,6 +31,7 @@ export function CustomerPicker({ customer, onChange, onDone }: {
   const [active, setActive] = useState(0);
   const [found, setFound] = useState<{ q: string; list: Customer[]; offline: boolean } | null>(null);
   const [creating, setCreating] = useState<Partial<CustomerForm> | null>(null);
+  const [special, setSpecial] = useState(false); // la fiche en cours est celle d'un client spécial
   const q = query.trim();
 
   useEffect(() => {
@@ -60,6 +62,7 @@ export function CustomerPicker({ customer, onChange, onDone }: {
   function choose(option: Option) {
     if (option.kind === 'create') {
       setOpen(false);
+      setSpecial(false);
       setCreating(prefillFrom(q)); // ce qui a été tapé pré-remplit le nom, le matricule ou le téléphone
       return;
     }
@@ -108,7 +111,11 @@ export function CustomerPicker({ customer, onChange, onDone }: {
           onFocus={() => setOpen(true)} onBlur={() => setOpen(false)} onKeyDown={onKeyDown} />
       </div>
       <button type="button" className="add" title="Nouveau client" aria-label="Nouveau client"
-        onClick={() => setCreating(prefillFrom(q))}><Icon name="plus" /></button>
+        onClick={() => { setSpecial(false); setCreating(prefillFrom(q)); }}><Icon name="plus" /></button>
+      {canAddSpecial && (
+        <button type="button" className="add special" title="Nouveau client spécial (avec une remise)" aria-label="Nouveau client spécial"
+          onClick={() => { setSpecial(true); setCreating({ ...prefillFrom(q), discount: '' }); }}><Icon name="tag" /></button>
+      )}
 
       {open && (
         // mousedown annulé : le champ garde le focus pendant le clic sur une suggestion.
@@ -136,7 +143,7 @@ export function CustomerPicker({ customer, onChange, onDone }: {
       )}
 
       {creating && (
-        <NewCustomerModal initial={creating}
+        <NewCustomerModal initial={creating} special={special}
           onCreated={(c) => { setCreating(null); reset(); onChange(c); onDone(); }}
           onClose={() => { setCreating(null); onDone(); }} />
       )}

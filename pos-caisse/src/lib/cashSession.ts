@@ -77,7 +77,7 @@ export function expectedCash(
 }
 
 /** Moyens de paiement comptés à la clôture, dans l'ordre du tableau et du rapport. Le crédit n'en fait pas partie. */
-export const COUNTED_METHODS: CountedMethod[] = ['cash', 'card', 'mobile'];
+export const COUNTED_METHODS: CountedMethod[] = ['cash', 'card', 'mobile', 'qr'];
 
 export type Expected = Record<CountedMethod, number>;
 
@@ -93,7 +93,7 @@ export function expectedByMethod(
   const total = (docs: { payments: Payment[] }[], method: PaymentMethod) =>
     docs.reduce((s, d) => s + paidWith(d.payments, method), 0);
   const net = (method: PaymentMethod) => total(countedSales(sales), method) - total(refunds, method) + paidWith(payments, method);
-  return { cash: expectedCash(openingCash, sales, movements, refunds, payments), card: net('card'), mobile: net('mobile') };
+  return { cash: expectedCash(openingCash, sales, movements, refunds, payments), card: net('card'), mobile: net('mobile'), qr: net('qr') };
 }
 
 // --- Comptage des espèces par billets et pièces ---------------------------------------------------------
@@ -312,7 +312,7 @@ export const isLocalMovement = (v: unknown): v is LocalCashMovement =>
 
 // --- Rapport (X pendant la session, Z à la clôture) ---------------------------------------------------
 
-export const METHODS: PaymentMethod[] = ['cash', 'card', 'mobile', 'credit'];
+export const METHODS: PaymentMethod[] = ['cash', 'card', 'mobile', 'qr', 'credit'];
 
 export interface SessionReport {
   salesCount: number; // ventes non annulées

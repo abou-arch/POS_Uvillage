@@ -111,7 +111,7 @@ export function SessionPage({ id }: { id: string }) {
             <table>
               <thead><tr><th>Moyen</th><th className="num">Attendu (serveur)</th>{data.counts && <><th className="num">Attendu (caisse)</th><th className="num">Compté</th><th className="num">Écart</th></>}</tr></thead>
               <tbody>
-                {(['cash', 'card', 'mobile'] as const).map((m) => {
+                {(['cash', 'card', 'mobile', 'qr'] as const).map((m) => {
                   const c = data.counts?.find((x) => x.method === m)
                   return (
                     <tr key={m}>

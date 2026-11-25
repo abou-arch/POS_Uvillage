@@ -19,6 +19,7 @@ export function loadState({ sales, cashSessions, cashMovements, refunds, custome
     for (const p of saved.products ?? []) {
       const product = products.find((x) => x.id === p.id);
       if (product) Object.assign(product, { stock_by_store: p.stock_by_store, updated_at: p.updated_at });
+      else if (p.created_here) products.push(p); // article créé à la caisse (contrat 0.9)
     }
     console.log(`État repris de mock-api/state.json : ${sales.size} ventes, ${cashSessions.size} sessions, ${cashMovements.size} mouvements, ${refunds.size} retours.`);
   } catch (e) {
@@ -34,7 +35,7 @@ export function saveState({ sales, cashSessions, cashMovements, refunds, custome
     refunds: [...refunds.values()],
     customerPayments: [...customerPayments.values()],
     customers,
-    products: products.map(({ id, stock_by_store, updated_at }) => ({ id, stock_by_store, updated_at })),
+    products: products.map((p) => (p.created_here ? p : { id: p.id, stock_by_store: p.stock_by_store, updated_at: p.updated_at })),
   };
   try {
     writeFileSync(FILE, JSON.stringify(data, null, 1));

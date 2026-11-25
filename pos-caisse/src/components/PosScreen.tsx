@@ -43,6 +43,7 @@ import { CashMovementModal } from './CashMovementModal';
 import { CloseSessionModal } from './CloseSessionModal';
 import { HeldListModal } from './HeldListModal';
 import { RefundModal, type RefundChoice } from './RefundModal';
+import { NewProductModal } from './NewProductModal';
 import { ProductGrid } from './ProductGrid';
 import { SessionModal } from './SessionModal';
 import { PrintSheet } from './Ticket';
@@ -100,6 +101,7 @@ export function PosScreen({ session, cashSession, sync, unreadableSessions, requ
   const [approval, setApproval] = useState<ApprovalRequest | null>(null);
   const approvers = useApprovers(session.storeId);
   const barcodeRules = useBarcodeRules(session.storeId);
+  const [creatingProduct, setCreatingProduct] = useState(false); // fenêtre « Nouvel article »
   const [weighing, setWeighing] = useState<Product | null>(null); // article au poids dont le caissier tape le poids
   const limits = discountLimits(session);
   const role = session.user.role;
@@ -517,14 +519,21 @@ export function PosScreen({ session, cashSession, sync, unreadableSessions, requ
       <SyncBanners sync={sync} unreadable={unreadable} />
       <main>
         <Cart cart={cart} dispatch={cartDispatch} products={products.value} categories={categories} barcodeRules={barcodeRules} onPick={pick}
+          canAddSpecial={!needsApproval(role)}
           lastSale={lastSale && lastSaleView(lastSale)}
           overLimit={overLimit} onCheckout={checkout} onHold={hold} />
         <ProductGrid products={products.value} categories={categories} brands={brands}
+          onNewProduct={() => setCreatingProduct(true)}
           onAdd={(product) => {
             pick(product);
             document.getElementById('scan')?.focus(); // la douchette reste prête après un clic sur une tuile
           }} />
       </main>
+      {creatingProduct && (
+        <NewProductModal storeId={session.storeId} categories={categories}
+          onCreated={(product) => { setCreatingProduct(false); pick(product); document.getElementById('scan')?.focus(); }}
+          onClose={() => { setCreatingProduct(false); document.getElementById('scan')?.focus(); }} />
+      )}
       {weighing && (
         <WeightModal product={weighing} onClose={closeWeighing}
           onAdd={(quantity) => { cartDispatch({ type: 'add', product: weighing, quantity }); closeWeighing(); }} />

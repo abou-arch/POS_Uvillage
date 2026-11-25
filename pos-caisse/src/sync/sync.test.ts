@@ -77,7 +77,7 @@ function paymentOp(amount = 2000): OutboxItem & { kind: 'customer_payment' } {
 }
 function closeOp(sessionId = SESSION): OutboxItem & { closing: CashSessionClosing } {
   const closing = buildClosing({
-    counted: { cash: 56000, card: 8000, mobile: 0 }, expected: { cash: 57000, card: 8000, mobile: 0 }, cashCount: null,
+    counted: { cash: 56000, card: 8000, mobile: 0, qr: 0 }, expected: { cash: 57000, card: 8000, mobile: 0, qr: 0 }, cashCount: null,
     note: 'Erreur de rendu', role: 'cashier', threshold: 2000, closedBy: 'u_2', now,
   });
   return { kind: 'session_close', id: closeKey(sessionId), session_id: sessionId, closing, error: null };

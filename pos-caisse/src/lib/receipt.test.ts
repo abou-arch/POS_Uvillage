@@ -174,7 +174,7 @@ describe('rapport de session 80 mm', () => {
     expect(x.sales).toEqual([{ label: 'Nombre de ventes', value: '2' }, { label: 'Total TTC', value: mad(2400) }]);
     expect(x.methods).toEqual([
       { label: 'Espèces', value: mad(1200) }, { label: 'Carte', value: mad(1200) },
-      { label: 'Mobile', value: mad(0) }, { label: 'Crédit', value: mad(0) },
+      { label: 'Mobile', value: mad(0) }, { label: 'QR code', value: mad(0) }, { label: 'Crédit', value: mad(0) },
     ]);
     expect(x.vat).toEqual([{ rate: '20 %', ht: mad(1500), tva: mad(300) }, { rate: '0 %', ht: mad(600), tva: mad(0) }]);
     expect(x.totals).toEqual([{ label: 'Total HT', value: mad(2100) }, { label: 'Total TVA', value: mad(300) }]);
@@ -192,6 +192,7 @@ describe('rapport de session 80 mm', () => {
         { label: 'Espèces', value: mad(51700), strong: true }, // 500 + 12 + 10 − 5
         { label: 'Carte', value: mad(1200), strong: false },
         { label: 'Mobile', value: mad(0), strong: false },
+        { label: 'QR code', value: mad(0), strong: false },
       ],
     }]);
     expect(x.cashCount).toEqual([]);
@@ -229,7 +230,7 @@ describe('rapport de session 80 mm', () => {
 
   it('rapport de clôture : qui et quand, attendu / compté / écart par moyen, comptage et note de clôture', () => {
     const closing = buildClosing({
-      counted: { cash: 51000, card: 1200, mobile: 0 }, expected: { cash: 51700, card: 1200, mobile: 0 },
+      counted: { cash: 51000, card: 1200, mobile: 0, qr: 0 }, expected: { cash: 51700, card: 1200, mobile: 0, qr: 0 },
       cashCount: [{ value: 20000, quantity: 2 }, { value: 10000, quantity: 1 }, { value: 50, quantity: 20 }],
       note: 'Erreur de rendu', role: 'cashier', threshold: 2000, closedBy: 'u_1', now: new Date('2026-11-12T20:30:00Z'),
     });
@@ -250,6 +251,9 @@ describe('rapport de session 80 mm', () => {
         { label: 'Attendu', value: mad(1200) }, { label: 'Compté', value: mad(1200) }, { label: 'Écart', value: mad(0), strong: true },
       ] },
       { title: 'MOBILE', rows: [
+        { label: 'Attendu', value: mad(0) }, { label: 'Compté', value: mad(0) }, { label: 'Écart', value: mad(0), strong: true },
+      ] },
+      { title: 'QR CODE', rows: [
         { label: 'Attendu', value: mad(0) }, { label: 'Compté', value: mad(0) }, { label: 'Écart', value: mad(0), strong: true },
       ] },
     ]);

@@ -122,7 +122,7 @@ describe('indicateurs', () => {
   it('par moyen de paiement : remboursements déduits, ordre fixe', () => {
     expect(byMethod([a, b, c], [r])).toEqual([
       { method: 'cash', amount: a.totals.ttc - 750 }, { method: 'card', amount: 1875 },
-      { method: 'mobile', amount: 0 }, { method: 'credit', amount: 0 },
+      { method: 'mobile', amount: 0 }, { method: 'qr', amount: 0 }, { method: 'credit', amount: 0 },
     ]);
   });
 });
@@ -180,7 +180,7 @@ describe('ventes, sessions, clients', () => {
     const session = (id: string, opened_at: string, closed: boolean): LocalCashSession => ({
       id, store_id: 'st_1', register_id: 'reg_1', opened_by: 'u_1', opened_at, opening_cash: 50000, opening_note: null,
       status: closed ? 'closed' : 'open', closed_by: closed ? 'u_1' : null, closed_at: closed ? opened_at : null,
-      counts: closed ? [{ method: 'cash', expected: 57000, counted: 56000, difference: -1000 }, { method: 'card', expected: 8000, counted: 8000, difference: 0 }, { method: 'mobile', expected: 0, counted: 0, difference: 0 }] : null,
+      counts: closed ? [{ method: 'cash', expected: 57000, counted: 56000, difference: -1000 }, { method: 'card', expected: 8000, counted: 8000, difference: 0 }, { method: 'mobile', expected: 0, counted: 0, difference: 0 }, { method: 'qr', expected: 0, counted: 0, difference: 0 }] : null,
       cash_count: null, closing_note: null, opened_by_name: 'Caissier', closed_by_name: closed ? 'Caissier' : null,
     });
     const s1 = sale('2026-11-17T09:00:00Z', [line('soda', 10, 1200, 20)], 'cash', { session_id: 'ses_old' }); // 120 DH

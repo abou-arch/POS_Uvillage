@@ -13,6 +13,14 @@ export interface CartState {
 export const emptyCart: CartState = { lines: [], customer: null, otherCharges: 0, globalDiscount: 0, sendSms: false };
 
 export const MAX_QUANTITY = 9999; // garde-fou contre les saisies aberrantes du POS actuel
+export const MAX_OTHER_CHARGES = 1000_00; // frais supplémentaires d'un ticket : 1 000 DH au plus
+
+/** Frais supplémentaires tapés (livraison, sachet…) : null s'ils conviennent (0 les retire). */
+export function chargesError(cents: number | null): string | null {
+  if (cents === null) return 'Montant invalide (ex. 5,00).';
+  if (cents > MAX_OTHER_CHARGES) return '1 000,00 DH au plus : vérifiez la saisie.';
+  return null;
+}
 
 export type CartAction =
   | { type: 'add'; product: Product; quantity?: number } // quantity : le poids en kg d'un article au poids (1 par défaut)
@@ -57,6 +65,20 @@ export const articleCount = (lines: CartLine[]) => lines.reduce((n, l) => n + (l
 /** Un SMS n'est possible que si le client a un téléphone (le client de passage n'en a pas). */
 export const canSendSms = (state: CartState) => !!state.customer?.phone;
 
+/** Client spécial (contrat 0.9) : il a une remise en % sur tous ses tickets. */
+export const isSpecialCustomer = (customer: Customer | null) => (customer?.discount_percent ?? 0) > 0;
+
+/**
+ * Remise d'un client spécial : son pourcentage des articles (après leurs remises de ligne), hors frais
+ * supplémentaires, arrondi au centime. 0 sans client spécial.
+ */
+export function specialDiscount(state: Pick<CartState, 'lines' | 'customer'>): number {
+  const percent = state.customer?.discount_percent ?? 0;
+  if (percent <= 0) return 0;
+  const articles = state.lines.reduce((s, l) => s + lineGross(l) - l.discount, 0);
+  return Math.round((articles * percent) / 100);
+}
+
 /** Montant d'une ligne avant sa remise : la base de la remise de ligne. */
 export const lineGross = (l: CartLine) => Math.round(l.quantity * l.unit_price_ttc);
 
@@ -67,6 +89,8 @@ export const lineGross = (l: CartLine) => Math.round(l.quantity * l.unit_price_t
  */
 function withinLimits(state: CartState): CartState {
   const lines = state.lines.map((l) => (l.discount > lineGross(l) ? { ...l, discount: lineGross(l) } : l));
+  // Client spécial : la remise globale est toujours son pourcentage du panier, recalculée à chaque changement.
+  if (isSpecialCustomer(state.customer)) return { ...state, lines, globalDiscount: specialDiscount({ lines, customer: state.customer }) };
   const maxGlobal = lines.reduce((s, l) => s + lineGross(l) - l.discount, 0) + state.otherCharges;
   return { ...state, lines, globalDiscount: Math.min(state.globalDiscount, maxGlobal) };
 }
@@ -112,10 +136,12 @@ function apply(state: CartState, action: CartAction): CartState {
       return { ...state, lines: state.lines.filter((l) => l.product_id !== action.productId) };
     case 'setCustomer': {
       const next = { ...state, customer: action.customer };
-      return { ...next, sendSms: next.sendSms && canSendSms(next) };
+      // Le client spécial retiré emporte sa remise ; une remise tapée à la main pour un autre client reste.
+      const globalDiscount = isSpecialCustomer(state.customer) && !isSpecialCustomer(action.customer) ? 0 : state.globalDiscount;
+      return { ...next, globalDiscount, sendSms: next.sendSms && canSendSms(next) };
     }
     case 'setOtherCharges':
-      return { ...state, otherCharges: clamp(Math.round(action.amount), 0, 10_000_000) };
+      return { ...state, otherCharges: clamp(Math.round(action.amount), 0, MAX_OTHER_CHARGES) };
     case 'setGlobalDiscount':
       return { ...state, globalDiscount: clamp(Math.round(action.amount), 0, 10_000_000) };
     case 'toggleSms':

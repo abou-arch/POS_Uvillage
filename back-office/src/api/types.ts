@@ -2,7 +2,7 @@
 
 export type Role = 'admin' | 'manager' | 'cashier'
 export type Unit = 'unit' | 'kg'
-export type Method = 'cash' | 'card' | 'mobile' | 'credit'
+export type Method = 'cash' | 'card' | 'mobile' | 'qr' | 'credit'
 
 export interface User { id: string; name: string; role: Role; username?: string }
 
@@ -67,13 +67,13 @@ export interface RefundRow {
   payments: Payment[]; approval_warning: boolean
 }
 
-export interface Count { method: 'cash' | 'card' | 'mobile'; expected: number; counted: number; difference: number }
+export interface Count { method: 'cash' | 'card' | 'mobile' | 'qr'; expected: number; counted: number; difference: number }
 export interface Session {
   id: string; store_id: string; register_id: string; status: 'open' | 'closed'; opened_by: string; opened_at: string
   opening_cash: number; opening_note: string | null; closed_by: string | null; closed_at: string | null
   counts: Count[] | null; closing_note: string | null; store_name: string | null; register_name: string | null
   opened_by_name: string | null; closed_by_name: string | null; forced: boolean; expected_mismatch: boolean
-  approval_warning: boolean; api_expected: Record<'cash' | 'card' | 'mobile', number> | null; difference: number | null
+  approval_warning: boolean; api_expected: Record<'cash' | 'card' | 'mobile' | 'qr', number> | null; difference: number | null
 }
 export interface CashMovement {
   id: string; type: 'in' | 'out'; amount: number; reason: string; created_by_name: string | null; created_at: string
@@ -85,10 +85,11 @@ export interface SessionDetail extends Session {
 
 export interface Customer {
   id: string; name: string; phone: string | null; matricule: string | null; created_at: string
+  discount_percent: number | null // client spécial : remise en % sur tous ses tickets
   balance: number; sales_count: number; sales_ttc: number; last_sale_at: string | null
 }
 export interface CustomerPayment {
-  id: string; method: 'cash' | 'card' | 'mobile'; amount: number; note: string | null; user_name: string | null
+  id: string; method: 'cash' | 'card' | 'mobile' | 'qr'; amount: number; note: string | null; user_name: string | null
   store_name: string | null; created_at: string
 }
 export interface CustomerDetail {
@@ -122,13 +123,13 @@ export interface StockAlert {
 export interface Dashboard {
   period: { from: string; to: string }; report: Report; previous: { from: string; to: string; summary: Summary }
   stock_alerts: { count: number; items: StockAlert[] }
-  open_sessions: (Session & { expected: Record<'cash' | 'card' | 'mobile', number> })[]
+  open_sessions: (Session & { expected: Record<'cash' | 'card' | 'mobile' | 'qr', number> })[]
   warnings: { price: number; approval: number; session_closed: number; expected_mismatch: number }
   customers_due: { count: number; total: number; top: Customer[] }
   overview: Overview
 }
 
-export const METHOD_LABELS: Record<Method, string> = { cash: 'Espèces', card: 'Carte', mobile: 'Mobile', credit: 'Crédit' }
+export const METHOD_LABELS: Record<Method, string> = { cash: 'Espèces', card: 'Carte', mobile: 'Mobile', qr: 'QR code', credit: 'Crédit' }
 export const ROLE_LABELS: Record<Role, string> = { admin: 'Administrateur', manager: 'Responsable', cashier: 'Caissier' }
 export const REASON_LABELS: Record<string, string> = {
   defective: 'Défectueux', cashier_error: 'Erreur de caisse', changed_mind: 'Changement d’avis', other: 'Autre',

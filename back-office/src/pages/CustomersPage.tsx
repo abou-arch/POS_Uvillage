@@ -40,12 +40,12 @@ export function CustomersPage() {
         {!data ? loading && <Loading /> : data.length === 0 ? <Empty>Aucun client trouvé.</Empty> : (
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Nom</th><th>Téléphone</th><th>Matricule</th><th className="num">Achats</th><th className="num">Total acheté</th><th>Dernier achat</th><th className="num">Reste dû</th></tr></thead>
+              <thead><tr><th>Nom</th><th>Téléphone</th><th>Matricule</th><th className="num">Remise</th><th className="num">Achats</th><th className="num">Total acheté</th><th>Dernier achat</th><th className="num">Reste dû</th></tr></thead>
               <tbody>
                 {data.map((c) => (
                   <tr key={c.id} className="clickable" onClick={() => go(`/clients/${c.id}`)}>
                     <td><a href={`#/clients/${c.id}`} onClick={(e) => e.stopPropagation()}>{c.name}</a></td>
-                    <td>{c.phone ?? '—'}</td><td>{c.matricule ?? '—'}</td>
+                    <td>{c.phone ?? '—'}</td><td>{c.matricule ?? '—'}</td><td className="num">{c.discount_percent ? `${c.discount_percent} %` : '—'}</td>
                     <td className="num">{c.sales_count}</td><td className="num">{formatMad(c.sales_ttc)}</td>
                     <td className="nowrap">{formatDateTime(c.last_sale_at, timeZone)}</td>
                     <td className="num">{c.balance > 0 ? <Badge tone="amber">{formatMad(c.balance)}</Badge> : c.balance < 0 ? <Badge tone="blue">avoir {formatMad(-c.balance)}</Badge> : '—'}</td>
@@ -72,7 +72,7 @@ export function CustomerPage({ id }: { id: string }) {
   const bought = data.sales.filter((s) => s.status === 'completed').reduce((n, s) => n + s.total_ttc, 0)
   return (
     <>
-      <PageHeader title={c.name} back="#/clients" subtitle={[c.phone, c.matricule && `matricule ${c.matricule}`].filter(Boolean).join(' · ') || 'Sans téléphone ni matricule'}
+      <PageHeader title={c.name} back="#/clients" subtitle={[c.discount_percent && `client spécial −${c.discount_percent} %`, c.phone, c.matricule && `matricule ${c.matricule}`].filter(Boolean).join(' · ') || 'Sans téléphone ni matricule'}
         actions={<>
           <Button icon="edit" onClick={() => setEditing(true)}>Modifier</Button>
           <Button icon="wallet" variant="primary" disabled={data.balance <= 0} onClick={() => setPaying(true)}>Encaisser un règlement</Button>
@@ -117,16 +117,19 @@ function CustomerForm({ customer, onClose, onSaved }: { customer?: CustomerDetai
   const [name, setName] = useState(customer?.name ?? '')
   const [phone, setPhone] = useState(customer?.phone ?? '')
   const [matricule, setMatricule] = useState(customer?.matricule ?? '')
+  const [discount, setDiscount] = useState(customer?.discount_percent ? String(customer.discount_percent) : '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const phoneOk = !phone.trim() || /^\+?\d{6,15}$/.test(phone.replace(/[\s.-]/g, ''))
   const matriculeOk = !matricule.trim() || /^\d{1,15}$/.test(matricule.trim())
+  const discountOk = !discount.trim() || (/^\d{1,3}$/.test(discount.trim()) && Number(discount) >= 1 && Number(discount) <= 100)
   async function submit(e: FormEvent) {
     e.preventDefault()
     setBusy(true)
     setError(null)
     try {
-      const body = { name: name.trim(), phone: phone.trim() || null, matricule: matricule.trim() || null }
+      const body = { name: name.trim(), phone: phone.trim() || null, matricule: matricule.trim() || null,
+        discount_percent: discount.trim() ? Number(discount) : null }
       const saved = customer ? await api.put<{ id: string }>(`/admin/customers/${customer.id}`, body) : await api.post<{ id: string }>('/admin/customers', body)
       notify('Client enregistré.')
       onSaved(saved.id)
@@ -139,12 +142,15 @@ function CustomerForm({ customer, onClose, onSaved }: { customer?: CustomerDetai
   return (
     <Modal title={customer ? `Modifier ${customer.name}` : 'Nouveau client'} onClose={onClose} footer={<>
       <Button onClick={onClose}>Annuler</Button>
-      <Button type="submit" form="customer-form" variant="primary" busy={busy} disabled={!name.trim() || !phoneOk || !matriculeOk}>Enregistrer</Button>
+      <Button type="submit" form="customer-form" variant="primary" busy={busy} disabled={!name.trim() || !phoneOk || !matriculeOk || !discountOk}>Enregistrer</Button>
     </>}>
       <form id="customer-form" className="form" onSubmit={submit}>
         <Field label="Nom" wide><input autoFocus value={name} maxLength={100} onChange={(e) => setName(e.target.value)} /></Field>
         <Field label="Téléphone" error={phoneOk ? null : '6 à 15 chiffres'}><input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="06 12 34 56 78" /></Field>
         <Field label="Matricule universitaire" error={matriculeOk ? null : 'Chiffres seulement, 15 au plus'}><input inputMode="numeric" value={matricule} onChange={(e) => setMatricule(e.target.value)} /></Field>
+        <Field label="Remise client spécial (%)" error={discountOk ? null : 'Pourcentage entier de 1 à 100'}>
+          <input inputMode="numeric" value={discount} onChange={(e) => setDiscount(e.target.value)} placeholder="Vide = client ordinaire" />
+        </Field>
         {error && <p className="alert form-field wide"><Icon name="alert" />{error}</p>}
       </form>
     </Modal>
@@ -156,7 +162,7 @@ function PaymentForm({ customerId, balance, onClose, onSaved }: { customerId: st
   const { me, storeId, notify } = useApp()
   const [paymentId] = useState(() => crypto.randomUUID())
   const [store, setStore] = useState(storeId || me.stores[0]?.id || '')
-  const [method, setMethod] = useState<'cash' | 'card' | 'mobile'>('cash')
+  const [method, setMethod] = useState<'cash' | 'card' | 'mobile' | 'qr'>('cash')
   const [amount, setAmount] = useState('')
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
@@ -190,7 +196,7 @@ function PaymentForm({ customerId, balance, onClose, onSaved }: { customerId: st
         </Field>
         <Field label="Moyen">
           <select value={method} onChange={(e) => setMethod(e.target.value as typeof method)}>
-            <option value="cash">Espèces</option><option value="card">Carte</option><option value="mobile">Mobile</option>
+            <option value="cash">Espèces</option><option value="card">Carte</option><option value="mobile">Mobile</option><option value="qr">QR code</option>
           </select>
         </Field>
         <Field label="Magasin"><select value={store} onChange={(e) => setStore(e.target.value)}>{me.stores.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>

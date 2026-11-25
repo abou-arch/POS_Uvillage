@@ -15,7 +15,7 @@ import { downloadCsv, TZ, useNow, type PageProps, type SaleRequest } from './sha
 
 type When = PeriodKey | 'all';
 const WHEN: When[] = ['today', 'yesterday', 'week', 'month', 'all'];
-const FILTERS: SaleFilter[] = ['all', 'cash', 'card', 'mobile', 'credit', 'refunded', 'cancelled'];
+const FILTERS: SaleFilter[] = ['all', 'cash', 'card', 'mobile', 'qr', 'credit', 'refunded', 'cancelled'];
 const PAGE = 100;
 
 const methodsOf = (r: ReceiptData) => [...new Set(r.sale.payments.map((p) => METHOD_LABELS[p.method]))].join(' + ');

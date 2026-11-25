@@ -63,6 +63,13 @@ describe('plafond de remise d’un caissier (§2, §11)', () => {
     expect(discountNeedsApproval('cashier', cart(base.lines, { ...base, globalDiscount: 1001 }), LIMITS)).toBe(true);
   });
 
+  it('client spécial : sa remise, fixée par le propriétaire, ne demande pas de PIN (contrat 0.9)', () => {
+    const special = { id: 'c_9', name: 'Fidèle', phone: null, matricule: null, discount_percent: 30 };
+    const c = cart([line('p_1', 10, 1000)], { customer: special, globalDiscount: 3000 });
+    expect(discountsOverLimit(c, LIMITS)).toEqual({ lines: [], global: false });
+    expect(discountNeedsApproval('cashier', c, LIMITS)).toBe(false);
+  });
+
   it('chaque ligne est jugée sur son propre montant ; quantité au poids arrondie au centime', () => {
     const c = cart([line('p_1', 3, 1000, 300), line('p_2', 1, 500, 51), line('p_3', 0.25, 4000, 100)]);
     expect(discountsOverLimit(c, LIMITS)).toEqual({ lines: ['p_2'], global: false }); // 10,2 % ; 10 % pile ; 10 % pile
@@ -80,7 +87,7 @@ describe('clôture au-delà du seuil (§9, §11)', () => {
   const counts = (cash: number, card = 0): MethodCount[] => [
     { method: 'cash', expected: 57000, counted: 57000 + cash, difference: cash },
     { method: 'card', expected: 8000, counted: 8000 + card, difference: card },
-    { method: 'mobile', expected: 0, counted: 0, difference: 0 },
+    { method: 'mobile', expected: 0, counted: 0, difference: 0 }, { method: 'qr', expected: 0, counted: 0, difference: 0 },
   ];
   it('un écart de plus que le seuil, manque ou excédent, sur n’importe quel moyen', () => {
     expect(closingNeedsApproval('cashier', counts(-2000), 2000)).toBe(false); // pile le seuil

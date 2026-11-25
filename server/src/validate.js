@@ -15,7 +15,7 @@ export const isQuantity = (v) => typeof v === 'number' && v > 0 && v < 1e7 && Ma
 export const fitsUnit = (unit, q) => unit === undefined
   || (unit === 'unit' && Number.isInteger(q)) || (unit === 'kg' && Math.abs(q * 1000 - Math.round(q * 1000)) < 1e-6);
 
-export const METHODS = ['cash', 'card', 'mobile', 'credit'];
+export const METHODS = ['cash', 'card', 'mobile', 'qr', 'credit'];
 export const REASONS = ['defective', 'cashier_error', 'changed_mind', 'other'];
 export const sumOf = (list, fn) => list.reduce((n, x) => n + fn(x), 0);
 export const creditOf = (payments) => sumOf((payments ?? []).filter((p) => p.method === 'credit'), (p) => p.amount);

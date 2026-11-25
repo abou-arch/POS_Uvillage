@@ -36,8 +36,8 @@ const cardSale = sale([line('p_1', 40, 200, 0)], [card(8000)], 0);
 const out50 = { type: 'out' as const, amount: 5000 };
 
 // Clôture du critère : attendu 570 DH en espèces, 80 DH par carte, rien en mobile.
-const EXPECTED = { cash: 57000, card: 8000, mobile: 0 };
-const counted = (cash: number | null, card: number | null = 8000, mobile: number | null = 0): Counted => ({ cash, card, mobile });
+const EXPECTED = { cash: 57000, card: 8000, mobile: 0, qr: 0 };
+const counted = (cash: number | null, card: number | null = 8000, mobile: number | null = 0): Counted => ({ cash, card, mobile, qr: 0 });
 type ClosingInput = Parameters<typeof buildClosing>[0];
 const closingInput = (over: Partial<ClosingInput> = {}): ClosingInput => ({
   counted: counted(56000), expected: EXPECTED, cashCount: null, note: 'Erreur de rendu', role: 'cashier', threshold: 2000,
@@ -74,7 +74,7 @@ describe('montants attendus par moyen de paiement (§9)', () => {
 
   it('paiement mixte : chaque part va à son moyen ; le crédit n’est compté nulle part', () => {
     const mixed = sale([line('p_9', 4, 1000, 20)], [cash(1000), card(1500), { method: 'mobile', amount: 1000 }, { method: 'credit', amount: 500 }], 1000);
-    expect(expectedByMethod(0, [mixed], [])).toEqual({ cash: 1000, card: 1500, mobile: 1000 });
+    expect(expectedByMethod(0, [mixed], [])).toEqual({ cash: 1000, card: 1500, mobile: 1000, qr: 0 });
   });
 });
 
@@ -89,22 +89,22 @@ describe('retours dans les montants attendus (§9, contrat 0.5)', () => {
   it('chaque remboursement est déduit de son moyen ; le crédit n’est compté nulle part', () => {
     expect(expectedCash(50000, [cashSale, cardSale], [out50], refunds)).toBe(55000);
     // Carte : 80 DH de ventes − 90 DH remboursés = −10 DH (total du terminal négatif).
-    expect(expectedByMethod(50000, [cashSale, cardSale], [out50], refunds)).toEqual({ cash: 55000, card: -1000, mobile: 0 });
+    expect(expectedByMethod(50000, [cashSale, cardSale], [out50], refunds)).toEqual({ cash: 55000, card: -1000, mobile: 0, qr: 0 });
   });
   it('carte et mobile : un compté négatif est accepté ; pas pour les espèces', () => {
     expect(countedError(-1000, 'card')).toBeNull();
     expect(countedError(-1000, 'mobile')).toBeNull();
     expect(countedError(-1000)).toMatch(/Espèces : montant compté invalide/);
     expect(countedError(-MAX_COUNTED - 1, 'card')).toMatch(/vérifiez/);
-    const expected = { cash: 55000, card: -1000, mobile: 0 };
+    const expected = { cash: 55000, card: -1000, mobile: 0, qr: 0 };
     const closing = buildClosing({
-      counted: { cash: 55000, card: -1000, mobile: 0 }, expected, cashCount: null, note: '', role: 'cashier', threshold: 2000,
+      counted: { cash: 55000, card: -1000, mobile: 0, qr: 0 }, expected, cashCount: null, note: '', role: 'cashier', threshold: 2000,
       closedBy: 'u_2', now,
     });
     expect(closing.counts).toEqual([
       { method: 'cash', expected: 55000, counted: 55000, difference: 0 },
       { method: 'card', expected: -1000, counted: -1000, difference: 0 },
-      { method: 'mobile', expected: 0, counted: 0, difference: 0 },
+      { method: 'mobile', expected: 0, counted: 0, difference: 0 }, { method: 'qr', expected: 0, counted: 0, difference: 0 },
     ]);
     expect(isClosing(closing)).toBe(true);
     expect(isClosing({ ...closing, counts: closing.counts.map((c) => (c.method === 'cash' ? { ...c, expected: -1, counted: -1 } : c)) }))
@@ -114,10 +114,10 @@ describe('retours dans les montants attendus (§9, contrat 0.5)', () => {
     const report = sessionReport({ opening_cash: 50000, counts: null }, [cashSale, cardSale], [out50], refunds);
     expect(report).toMatchObject({
       refundsCount: 3, refundTotals: { ht: 9667, tva: 1833, ttc: 11500 }, cashRefunds: 2000,
-      expected: { cash: 55000, card: -1000, mobile: 0 },
+      expected: { cash: 55000, card: -1000, mobile: 0, qr: 0 },
     });
     expect(report.refundsByMethod).toEqual([
-      { method: 'cash', amount: 2000 }, { method: 'card', amount: 9000 }, { method: 'mobile', amount: 0 }, { method: 'credit', amount: 500 },
+      { method: 'cash', amount: 2000 }, { method: 'card', amount: 9000 }, { method: 'mobile', amount: 0 }, { method: 'qr', amount: 0 }, { method: 'credit', amount: 500 },
     ]);
   });
 });
@@ -208,7 +208,7 @@ describe('saisies du caissier', () => {
     expect(methodCounts(EXPECTED, counted(56000))).toEqual([
       { method: 'cash', expected: 57000, counted: 56000, difference: -1000 },
       { method: 'card', expected: 8000, counted: 8000, difference: 0 },
-      { method: 'mobile', expected: 0, counted: 0, difference: 0 },
+      { method: 'mobile', expected: 0, counted: 0, difference: 0 }, { method: 'qr', expected: 0, counted: 0, difference: 0 },
     ]);
     expect(methodCounts(EXPECTED, counted(56000, null))).toBeNull();
   });
@@ -288,7 +288,7 @@ describe('ce qui est envoyé à l’API (§9)', () => {
       counts: [
         { method: 'cash', expected: 57000, counted: 56000, difference: -1000 },
         { method: 'card', expected: 8000, counted: 8000, difference: 0 },
-        { method: 'mobile', expected: 0, counted: 0, difference: 0 },
+        { method: 'mobile', expected: 0, counted: 0, difference: 0 }, { method: 'qr', expected: 0, counted: 0, difference: 0 },
       ],
       cash_count: cashCount,
       closing_note: 'Erreur de rendu',
@@ -349,7 +349,7 @@ describe('rapport de session (X / Z)', () => {
       openingCash: 50000, expected: EXPECTED, counts,
     });
     expect(report.byMethod).toEqual([
-      { method: 'cash', amount: 12000 }, { method: 'card', amount: 8000 }, { method: 'mobile', amount: 0 }, { method: 'credit', amount: 0 },
+      { method: 'cash', amount: 12000 }, { method: 'card', amount: 8000 }, { method: 'mobile', amount: 0 }, { method: 'qr', amount: 0 }, { method: 'credit', amount: 0 },
     ]);
   });
 
@@ -371,7 +371,7 @@ describe('rapport de session (X / Z)', () => {
   it('rapport X (session ouverte) : ni compté ni écart ; session sans vente', () => {
     const report = sessionReport({ opening_cash: 50000, counts: null }, [], [{ type: 'in', amount: 1000 }]);
     expect(report).toMatchObject({
-      salesCount: 0, totals: { ht: 0, tva: 0, ttc: 0 }, vat: [], cashIn: 1000, expected: { cash: 51000, card: 0, mobile: 0 }, counts: null,
+      salesCount: 0, totals: { ht: 0, tva: 0, ttc: 0 }, vat: [], cashIn: 1000, expected: { cash: 51000, card: 0, mobile: 0, qr: 0 }, counts: null,
     });
   });
 });
@@ -379,7 +379,7 @@ describe('rapport de session (X / Z)', () => {
 describe('ménage de la base locale', () => {
   const opening = buildOpening({ id: SESSION, storeId: 'st_2', registerId: 'reg_3', openedBy: 'u_2', openingCash: 0, note: '', now });
   const closedOn = (id: string, closed_at: string): LocalCashSession =>
-    ({ ...closedSession(openedSession({ ...opening, id }, 'C'), buildClosing(closingInput({ counted: counted(0, 0, 0), expected: { cash: 0, card: 0, mobile: 0 }, note: '' })), 'C'), closed_at });
+    ({ ...closedSession(openedSession({ ...opening, id }, 'C'), buildClosing(closingInput({ counted: counted(0, 0, 0), expected: { cash: 0, card: 0, mobile: 0, qr: 0 }, note: '' })), 'C'), closed_at });
 
   it('seules les sessions clôturées depuis plus de 31 jours, sans rien à envoyer, quittent le poste', () => {
     const old = closedOn('old', '2026-10-01T20:00:00Z');

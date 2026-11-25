@@ -107,6 +107,7 @@ CREATE TABLE IF NOT EXISTS customers (
   name TEXT NOT NULL,
   phone TEXT,
   matricule TEXT,
+  discount_percent INTEGER,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -114,7 +115,7 @@ CREATE TABLE IF NOT EXISTS customer_payments (
   id TEXT PRIMARY KEY,
   customer_id TEXT NOT NULL REFERENCES customers(id),
   store_id TEXT NOT NULL,
-  method TEXT NOT NULL CHECK (method IN ('cash', 'card', 'mobile')),
+  method TEXT NOT NULL CHECK (method IN ('cash', 'card', 'mobile', 'qr')),
   amount INTEGER NOT NULL CHECK (amount > 0),
   note TEXT,
   user_id TEXT NOT NULL,
@@ -283,6 +284,19 @@ function migrate(db) {
   add('customer_payments', 'session_closed', 'INTEGER NOT NULL DEFAULT 0');
   add('customer_payments', 'balance_exceeded', 'INTEGER NOT NULL DEFAULT 0');
   db.exec('CREATE INDEX IF NOT EXISTS customer_payments_session ON customer_payments(session_id)');
+  // Client spécial : remise en % appliquée à tous ses tickets, fixée par un responsable.
+  add('customers', 'discount_percent', 'INTEGER');
+  // Paiement par QR code : la contrainte CHECK de customer_payments doit accepter 'qr' (table recréée).
+  const cp = get(db, "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'customer_payments'");
+  if (cp && !cp.sql.includes("'qr'")) {
+    db.exec('PRAGMA foreign_keys = OFF');
+    tx(db, () => {
+      db.exec(cp.sql.replace('CREATE TABLE customer_payments', 'CREATE TABLE customer_payments_new').replace("'mobile')", "'mobile', 'qr')"));
+      db.exec('INSERT INTO customer_payments_new SELECT * FROM customer_payments; DROP TABLE customer_payments; ALTER TABLE customer_payments_new RENAME TO customer_payments');
+      db.exec('CREATE INDEX IF NOT EXISTS customer_payments_session ON customer_payments(session_id)');
+    });
+    db.exec('PRAGMA foreign_keys = ON');
+  }
   // Contrat 0.8 : annulation demandée par un caissier, autorisée par un responsable (§5, §11).
   add('sales', 'cancel_approved_by', 'TEXT');
   // Back-office : date de création d'un article (« articles ajoutés récemment » du tableau de bord).

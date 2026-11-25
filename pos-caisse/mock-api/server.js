@@ -31,7 +31,7 @@ const error = (code, message, details = {}) => ({ error: { code, message, detail
 
 // Contrôles de format (§9) : UUID, entiers en centimes, dates ISO, textes de 200 caractères au plus.
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const isInt = (v, min) => Number.isInteger(v) && v >= min;
+const isInt = (v, min, max = Infinity) => Number.isInteger(v) && v >= min && v <= max;
 const isDate = (v) => typeof v === 'string' && !Number.isNaN(Date.parse(v));
 const isId = (v) => typeof v === 'string' && v.length > 0;
 const isText = (v) => typeof v === 'string' && v.trim() !== '' && v.length <= 200;
@@ -87,8 +87,34 @@ app.get('/api/products', (req, res) => {
   if (!store_id) return err(res, 400, 'STORE_REQUIRED', 'store_id est obligatoire');
   const list = products
     .filter((p) => !updated_since || p.updated_at > updated_since)
-    .map(({ stock_by_store, ...p }) => ({ ...p, stock: stock_by_store[store_id] ?? 0 }));
+    .map(({ stock_by_store, created_here: _c, ...p }) => ({ ...p, stock: stock_by_store[store_id] ?? 0 }));
   res.json(list);
+});
+
+// Nouvel article créé à la caisse, caissier compris (contrat 0.9) : code IT suivant, stock 0.
+app.post('/api/products', (req, res) => {
+  const b = req.body ?? {};
+  if (!b.store_id) return err(res, 400, 'STORE_REQUIRED', 'store_id est obligatoire');
+  if (!req.user.store_ids.includes(b.store_id)) return err(res, 403, 'FORBIDDEN', 'Magasin non autorisé');
+  const name = typeof b.name === 'string' ? b.name.trim() : '';
+  if (!name) return err(res, 400, 'NAME_REQUIRED', 'Le nom est obligatoire');
+  if (!isInt(b.price_ttc, 0, 1e9)) return err(res, 400, 'INVALID_PRICE', 'Prix de vente invalide (centimes)');
+  if (!isInt(b.tva_rate, 0, 100)) return err(res, 400, 'INVALID_TVA', 'Taux de TVA invalide');
+  if (!['unit', 'kg'].includes(b.unit)) return err(res, 400, 'INVALID_UNIT', 'Unité : pièce ou kg');
+  const barcode = b.barcode ? String(b.barcode).trim() : null;
+  if (barcode !== null && !/^\d{4,20}$/.test(barcode)) return err(res, 400, 'INVALID_BARCODE', 'Code-barres : 4 à 20 chiffres');
+  if (barcode && products.some((p) => p.barcode === barcode)) return err(res, 409, 'BARCODE_TAKEN', 'Code-barres déjà utilisé');
+  if (b.category_id && !categories.some((c) => c.id === b.category_id)) return err(res, 422, 'UNKNOWN_REFERENCE', 'Catégorie inconnue');
+  const max = Math.max(0, ...products.map((p) => (/^IT\d+$/.test(p.code) ? Number(p.code.slice(2)) : 0)));
+  const product = {
+    id: `p_${crypto.randomUUID().slice(0, 8)}`, code: `IT${String(max + 1).padStart(4, '0')}`, barcode, name, name_ar: null,
+    category_id: b.category_id || null, brand_id: null, price_ttc: b.price_ttc, tva_rate: b.tva_rate, unit: b.unit, image_url: null,
+    stock_alert: 0, expiry_date: null, active: true, updated_at: new Date().toISOString(), stock_by_store: {}, created_here: true,
+  };
+  products.push(product);
+  save();
+  const { stock_by_store: _s, created_here: _c, ...rest } = product;
+  res.status(201).json({ ...rest, stock: 0 });
 });
 
 app.get('/api/stores/:id/approvers', (req, res) => {
@@ -128,11 +154,15 @@ app.get('/api/customers', (req, res) => {
 });
 
 app.post('/api/customers', (req, res) => {
-  const { id, name, phone = null, matricule = null } = req.body ?? {};
+  const { id, name, phone = null, matricule = null, discount_percent = null } = req.body ?? {};
   if (!name) return err(res, 400, 'NAME_REQUIRED', 'Le nom est obligatoire');
   const existing = customers.find((c) => c.id === id);
   if (existing) return res.status(200).json(withBalance(existing));
-  const customer = { id: id ?? `c_${crypto.randomUUID()}`, name, phone, matricule };
+  // Client spécial (contrat 0.9) : remise de 1 à 100 %, fixée par un responsable seulement.
+  const discount = discount_percent === 0 ? null : discount_percent;
+  if (discount !== null && !isInt(discount, 1, 100)) return err(res, 400, 'INVALID_DATA', 'Remise du client : 1 à 100 %');
+  if (discount !== null && !['manager', 'admin'].includes(req.user.role)) return err(res, 403, 'FORBIDDEN', 'Seul un responsable crée un client spécial');
+  const customer = { id: id ?? `c_${crypto.randomUUID()}`, name, phone, matricule, discount_percent: discount };
   customers.push(customer);
   save();
   res.status(201).json(withBalance(customer));
@@ -276,7 +306,7 @@ app.get('/api/sales/by-number/:number', (req, res) => {
 });
 
 const REASONS = ['defective', 'cashier_error', 'changed_mind', 'other'];
-const METHODS = ['cash', 'card', 'mobile', 'credit'];
+const METHODS = ['cash', 'card', 'mobile', 'qr', 'credit'];
 const round3 = (n) => Math.round(n * 1000) / 1000;
 const isQuantity = (v) => typeof v === 'number' && v > 0 && Math.abs(v * 1000 - Math.round(v * 1000)) < 1e-6; // 3 décimales
 const sumOf = (list, fn) => list.reduce((n, x) => n + fn(x), 0);
@@ -353,14 +383,16 @@ const SESSION_FIELDS = ['id', 'store_id', 'register_id', 'status', 'opened_by', 
   'closed_by', 'approved_by', 'closed_at', 'counts', 'cash_count', 'closing_note'];
 const publicSession = (s) => Object.fromEntries(SESSION_FIELDS.map((k) => [k, s[k] ?? null]));
 
-const COUNTED_METHODS = ['cash', 'card', 'mobile']; // le crédit n'est pas de l'argent reçu
+const COUNTED_METHODS = ['cash', 'card', 'mobile', 'qr'];
+// Une caisse pas encore mise à jour (ou une clôture en attente hors ligne) n'envoie pas de comptage QR.
+const REQUIRED_COUNTS = ['cash', 'card', 'mobile']; // le crédit n'est pas de l'argent reçu
 
 /**
  * Montants attendus d'après ce que l'API a reçu (§9) : espèces = fond + ventes non annulées − remboursements
  * + règlements de dettes + entrées − sorties ; carte, mobile = ventes − remboursements + règlements de la session.
  */
 function expectedByMethod(session) {
-  const expected = { cash: session.opening_cash, card: 0, mobile: 0 };
+  const expected = { cash: session.opening_cash, card: 0, mobile: 0, qr: 0 };
   for (const sale of sales.values()) {
     if (sale.session_id !== session.id || sale.status === 'cancelled') continue;
     for (const p of sale.payments ?? []) if (p.method in expected) expected[p.method] += p.amount;
@@ -378,8 +410,8 @@ function expectedByMethod(session) {
 const isAmount = (method, v) => (method === 'cash' ? isInt(v, 0) : Number.isSafeInteger(v));
 const isCount = (c) => c && COUNTED_METHODS.includes(c.method) && isAmount(c.method, c.expected) && isAmount(c.method, c.counted)
   && Number.isInteger(c.difference);
-const validCounts = (counts) => Array.isArray(counts) && counts.length === COUNTED_METHODS.length && counts.every(isCount)
-  && COUNTED_METHODS.every((m) => counts.some((c) => c.method === m));
+const validCounts = (counts) => Array.isArray(counts) && new Set(counts.map((c) => c?.method)).size === counts.length && counts.every(isCount)
+  && REQUIRED_COUNTS.every((m) => counts.some((c) => c.method === m));
 const validCashCount = (lines) => lines === null || lines === undefined || (Array.isArray(lines)
   && lines.every((l) => l && isInt(l.value, 1) && isInt(l.quantity, 0))
   && new Set(lines.map((l) => l.value)).size === lines.length);

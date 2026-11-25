@@ -65,7 +65,10 @@ export interface Product {
 
 // matricule : identifiant universitaire du client (chiffres seulement).
 /** balance (contrat 0.8, §4) : reste dû d'après l'API, en centimes ; absent d'une API d'avant 0.8 et hors ligne. */
-export interface Customer { id: string; name: string; phone: string | null; matricule: string | null; balance?: number }
+/** discount_percent (contrat 0.9) : client spécial, remise en % sur tous ses tickets, fixée par un responsable ; null sinon. */
+export interface Customer {
+  id: string; name: string; phone: string | null; matricule: string | null; balance?: number; discount_percent?: number | null;
+}
 
 export interface CartLine {
   product_id: string;
@@ -78,7 +81,7 @@ export interface CartLine {
   stock: number;
 }
 
-export type PaymentMethod = 'cash' | 'card' | 'mobile' | 'credit';
+export type PaymentMethod = 'cash' | 'card' | 'mobile' | 'qr' | 'credit';
 export interface Payment { method: PaymentMethod; amount: number }
 
 export interface SaleLine extends Omit<CartLine, 'stock' | 'unit'> {
@@ -141,7 +144,7 @@ export interface CashSessionClosing {
   /** Responsable qui a autorisé la clôture d'un caissier au-delà du seuil (§11). Absent avant le contrat 0.6. */
   approved_by?: string | null;
   closed_at: string;
-  counts: MethodCount[]; // cash, card, mobile : une fois chacun
+  counts: MethodCount[]; // cash, card, mobile, qr : une fois chacun (qr absent des clôtures faites avant le paiement QR)
   cash_count: CashCountLine[] | null; // null : total des espèces saisi directement
   closing_note: string | null;
 }

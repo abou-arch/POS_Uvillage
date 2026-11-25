@@ -55,10 +55,10 @@ describe('règlement d’une dette à la caisse (§4, contrat 0.8)', () => {
   it('compté dans les attendus de la session, moyen par moyen (§9)', () => {
     const payments = [{ method: 'cash' as const, amount: 5000 }, { method: 'card' as const, amount: 2000 }, { method: 'mobile' as const, amount: 300 }];
     expect(expectedCash(10000, [], [], [], payments)).toBe(15000);
-    expect(expectedByMethod(10000, [], [{ type: 'out', amount: 1000 }], [], payments)).toEqual({ cash: 14000, card: 2000, mobile: 300 });
+    expect(expectedByMethod(10000, [], [{ type: 'out', amount: 1000 }], [], payments)).toEqual({ cash: 14000, card: 2000, mobile: 300, qr: 0 });
     const report = sessionReport({ opening_cash: 10000, counts: null }, [], [], [], payments);
     expect([report.paymentsCount, report.paymentsTotal, report.cashPayments]).toEqual([3, 7300, 5000]);
-    expect(report.paymentsByMethod).toEqual([{ method: 'cash', amount: 5000 }, { method: 'card', amount: 2000 }, { method: 'mobile', amount: 300 }]);
+    expect(report.paymentsByMethod).toEqual([{ method: 'cash', amount: 5000 }, { method: 'card', amount: 2000 }, { method: 'mobile', amount: 300 }, { method: 'qr', amount: 0 }]);
     expect(report.totals.ttc).toBe(0); // un règlement n'est pas une vente : pas de chiffre d'affaires ni de TVA
   });
 
