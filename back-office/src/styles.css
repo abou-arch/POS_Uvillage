@@ -348,3 +348,14 @@ table.recent td a { display:block; overflow:hidden; text-overflow:ellipsis; whit
   :root { --dur-fast:0ms; --dur-enter:0ms; --dur-exit:0ms; --dur-chart:0ms; --stagger:0ms; }
   *, *::before, *::after, ::backdrop { animation:none !important; transition:none !important; }
 }
+
+/* Sélection d'articles, saisie dans les tableaux (prix manquants, inventaire). */
+.bulk-bar { display:flex; align-items:center; gap:var(--sp-2); flex-wrap:wrap; padding:var(--sp-2) var(--sp-3); border:1px solid var(--accent-line);
+  border-radius:var(--r-md); background:var(--accent-soft); color:var(--accent); }
+.bulk-bar strong { margin-right:auto; }
+th.pick, td.pick { width:36px; padding-right:0; }
+td.pick input, th.pick input { width:16px; height:16px; cursor:pointer; }
+.price-input { width:110px; height:var(--control-sm); text-align:right; }
+.count-cell { display:inline-flex; align-items:center; gap:var(--sp-2); }
+.count-cell input { width:110px; height:var(--control-sm); text-align:right; }
+.count-cell input[aria-invalid="true"] { border-color:var(--bad); }

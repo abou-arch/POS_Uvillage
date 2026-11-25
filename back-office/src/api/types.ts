@@ -183,3 +183,20 @@ export interface Overview {
   period: { purchases: number; expenses: number; expenses_by_category: { category: ExpenseCategory; amount: number; count: number }[] }
   recent_products: { id: string; code: string; name: string; price_ttc: number; unit: Unit; added_at: string }[]
 }
+
+// --- Inventaire (feuille de comptage) ------------------------------------------------------------------------------
+
+export type InventoryStatus = 'open' | 'validated' | 'cancelled'
+export interface Inventory {
+  id: string; store_id: string; store_name: string; name: string; category_id: string | null; category_name: string | null
+  status: InventoryStatus; zero_uncounted: boolean; created_by_name: string | null; created_at: string
+  closed_by_name: string | null; closed_at: string | null
+  /** Articles comptés, écarts, valeur des écarts au prix d'achat (centimes), écarts sans prix d'achat. */
+  counted: number; gaps: number; gap_value: number; missing_cost: number
+}
+export interface InventoryRow {
+  product_id: string; code: string; name: string; name_ar: string | null; unit: Unit; cost_price: number | null
+  category_name: string | null; active: boolean; stock: number
+  counted: number | null; expected: number | null; delta: number | null; counted_at: string | null; counted_by_name: string | null
+}
+export const INVENTORY_STATUS: Record<InventoryStatus, string> = { open: 'En cours', validated: 'Validé', cancelled: 'Annulé' }

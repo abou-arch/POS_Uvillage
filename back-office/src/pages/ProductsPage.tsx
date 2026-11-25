@@ -3,28 +3,69 @@
 import { useState, type FormEvent } from 'react'
 import { api, ApiError, qs } from '../api/client'
 import { MOVE_LABELS, type Category, type Product, type StockMove, type Unit } from '../api/types'
+import { PAGE_SIZE, Pager } from '../components/Pager'
 import { Badge, Button, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHeader, Panel, SearchInput } from '../components/ui'
 import { csvMad, downloadCsv, toCsv } from '../lib/csv'
 import { centsToInput, formatDateTime, formatMad, formatQuantity, parseMad, plural } from '../lib/format'
 import { go, useApp, useDebounced, useLoad } from '../lib/hooks'
 
-type Status = 'all' | 'active' | 'inactive' | 'low'
+type Status = 'all' | 'active' | 'inactive' | 'low' | 'noprice'
+
+/** Corps complet attendu par PUT /admin/products/:id, à partir d'un article déjà chargé. */
+const productBody = (p: Product, set: Partial<Product> = {}) => {
+  const x = { ...p, ...set }
+  return {
+    code: x.code, barcode: x.barcode, name: x.name, name_ar: x.name_ar, category_id: x.category_id, brand_id: x.brand_id, price_ttc: x.price_ttc,
+    cost_price: x.cost_price, tva_rate: x.tva_rate, unit: x.unit, stock_alert: x.stock_alert, expiry_date: x.expiry_date, image_url: x.image_url, active: x.active,
+  }
+}
 
 export function ProductsPage() {
-  const { storeId, me } = useApp()
+  const { storeId, me, notify } = useApp()
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState<Status>('active')
   const [category, setCategory] = useState('')
   const [creating, setCreating] = useState(false)
+  const [offset, setOffset] = useState(0)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [bulk, setBulk] = useState(false)
+  const [prices, setPrices] = useState<Record<string, string>>({})
   const q = useDebounced(search)
+  const apiStatus = status === 'low' ? 'active' : status === 'noprice' ? 'all' : status
   const { data, error, loading, reload } = useLoad(
-    () => api.get<Product[]>(`/admin/products${qs({ search: q, status: status === 'low' ? 'active' : status, category_id: category })}`),
-    JSON.stringify([q, status, category]),
+    () => api.get<Product[]>(`/admin/products${qs({ search: q, status: apiStatus, category_id: category })}`),
+    JSON.stringify([q, apiStatus, category]),
   )
   const categories = useLoad(() => api.get<Category[]>('/admin/categories'), 'categories')
   const stockOf = (p: Product) => (storeId ? p.stock_by_store[storeId] ?? 0 : p.stock_total)
   const alertOf = (p: Product) => (storeId ? p.stock_alert : p.stock_alert * me.stores.length)
-  const rows = (data ?? []).filter((p) => status !== 'low' || stockOf(p) <= alertOf(p))
+  const rows = (data ?? []).filter((p) => (status !== 'low' || stockOf(p) <= alertOf(p)) && (status !== 'noprice' || p.price_ttc === 0))
+  const page = rows.slice(offset, offset + PAGE_SIZE)
+  const allOnPage = page.length > 0 && page.every((p) => selected.has(p.id))
+  const filterBy = <T,>(setter: (v: T) => void) => (v: T) => { setter(v); setOffset(0); setSelected(new Set()) }
+
+  function toggle(id: string) {
+    setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
+  }
+  function togglePage() {
+    setSelected((s) => { const n = new Set(s); page.forEach((p) => (allOnPage ? n.delete(p.id) : n.add(p.id))); return n })
+  }
+
+  // « Sans prix » : on saisit le prix dans la liste ; Entrée enregistre et rend l'article actif (proposé aux caisses).
+  async function savePrice(p: Product) {
+    const text = prices[p.id]?.trim()
+    if (!text) return
+    const price = parseMad(text)
+    if (price === null || price <= 0) { notify('Prix invalide : un montant en DH, 2 décimales au plus.', 'error'); return }
+    try {
+      await api.put<Product>(`/admin/products/${p.id}`, productBody(p, { price_ttc: price, active: true }))
+      setPrices((x) => { const { [p.id]: _done, ...rest } = x; return rest })
+      notify(`${p.code} : ${formatMad(price)}, article actif.`)
+      reload()
+    } catch (e) {
+      notify(e instanceof ApiError ? e.message : 'Prix non enregistré.', 'error')
+    }
+  }
 
   function exportCsv() {
     downloadCsv('articles.csv', toCsv(
@@ -43,31 +84,44 @@ export function ProductsPage() {
           <Button icon="plus" variant="primary" onClick={() => setCreating(true)}>Nouvel article</Button>
         </>} />
       <div className="toolbar">
-        <SearchInput value={search} onChange={setSearch} placeholder="Code, nom ou code-barres" />
-        <select value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Catégorie">
+        <SearchInput value={search} onChange={filterBy(setSearch)} placeholder="Code, nom ou code-barres" />
+        <select value={category} onChange={(e) => filterBy(setCategory)(e.target.value)} aria-label="Catégorie">
           <option value="">Toutes les catégories</option>
           {categories.data?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
         <div className="chips">
-          {([['active', 'Actifs'], ['low', 'Stock bas'], ['inactive', 'Inactifs'], ['all', 'Tous']] as const).map(([s, label]) => (
-            <button key={s} type="button" className={`chip${status === s ? ' on' : ''}`} onClick={() => setStatus(s)}>{label}</button>
+          {([['active', 'Actifs'], ['low', 'Stock bas'], ['noprice', 'Sans prix (0 DH)'], ['inactive', 'Inactifs'], ['all', 'Tous']] as const).map(([s, label]) => (
+            <button key={s} type="button" className={`chip${status === s ? ' on' : ''}`} onClick={() => filterBy(setStatus)(s)}>{label}</button>
           ))}
         </div>
       </div>
+      {status === 'noprice' && rows.length > 0 && <p className="notice"><Icon name="info" />Articles repris sans prix de vente : tapez le prix TTC puis Entrée.
+        L’article devient actif et part vers les caisses.</p>}
+      {selected.size > 0 && (
+        <div className="bulk-bar">
+          <strong>{plural(selected.size, 'article')} sélectionné{selected.size > 1 ? 's' : ''}</strong>
+          <Button small icon="edit" variant="primary" onClick={() => setBulk(true)}>Modifier la sélection</Button>
+          <Button small onClick={() => setSelected(new Set())}>Désélectionner</Button>
+        </div>
+      )}
       {error ? <ErrorBox error={error} onRetry={reload} /> : null}
       <Panel>
-        {!data ? loading && <Loading /> : rows.length === 0 ? <Empty>Aucun article trouvé.</Empty> : (
+        {!data ? loading && <Loading /> : rows.length === 0 ? <Empty>{status === 'noprice' ? 'Tous les articles ont un prix.' : 'Aucun article trouvé.'}</Empty> : (
           <div className="table-wrap">
             <table>
               <thead><tr>
+                <th className="pick"><input type="checkbox" checked={allOnPage} onChange={togglePage} aria-label="Sélectionner la page" /></th>
                 <th>Code</th><th>Nom</th><th>Catégorie</th><th>Unité</th><th className="num">Stock</th><th className="num">Prix d’achat</th>
                 <th className="num">Prix de vente</th><th className="num">TVA</th><th>Statut</th>
               </tr></thead>
               <tbody>
-                {rows.map((p) => {
+                {page.map((p) => {
                   const stock = stockOf(p)
                   return (
                     <tr key={p.id} className={`clickable${p.active ? '' : ' inactive'}`} onClick={() => go(`/articles/${p.id}`)}>
+                      <td className="pick" onClick={(e) => e.stopPropagation()}>
+                        <input type="checkbox" checked={selected.has(p.id)} onChange={() => toggle(p.id)} aria-label={`Sélectionner ${p.code}`} />
+                      </td>
                       <td className="nowrap"><a href={`#/articles/${p.id}`} onClick={(e) => e.stopPropagation()}>{p.code}</a><span className="sub">{p.barcode}</span></td>
                       <td>{p.name}{p.name_ar && <span className="sub" dir="rtl">{p.name_ar}</span>}</td>
                       <td>{p.category_name ?? <span className="muted">—</span>}</td>
@@ -75,7 +129,13 @@ export function ProductsPage() {
                       <td className="num">{stock <= 0 ? <Badge tone="red">{formatQuantity(stock, p.unit)}</Badge>
                         : stock <= alertOf(p) ? <Badge tone="amber">{formatQuantity(stock, p.unit)}</Badge> : formatQuantity(stock, p.unit)}</td>
                       <td className="num">{p.cost_price === null ? <span className="muted">—</span> : formatMad(p.cost_price)}</td>
-                      <td className="num">{formatMad(p.price_ttc)}{p.unit === 'kg' && <span className="sub">le kg</span>}</td>
+                      <td className="num" onClick={status === 'noprice' ? (e) => e.stopPropagation() : undefined}>
+                        {status === 'noprice' ? (
+                          <input className="price-input" value={prices[p.id] ?? ''} inputMode="decimal" placeholder="DH TTC" aria-label={`Prix de vente : ${p.name}`}
+                            onChange={(e) => setPrices((x) => ({ ...x, [p.id]: e.target.value }))}
+                            onKeyDown={(e) => { if (e.key === 'Enter') void savePrice(p) }} onBlur={() => void savePrice(p)} />
+                        ) : <>{formatMad(p.price_ttc)}{p.unit === 'kg' && <span className="sub">le kg</span>}</>}
+                      </td>
                       <td className="num">{p.tva_rate} %</td>
                       <td>{p.active ? <Badge tone="green">Actif</Badge> : <Badge>Inactif</Badge>}</td>
                     </tr>
@@ -85,9 +145,68 @@ export function ProductsPage() {
             </table>
           </div>
         )}
+        <Pager offset={offset} total={rows.length} onChange={setOffset} />
       </Panel>
       {creating && <ProductForm onClose={() => setCreating(false)} onSaved={(p) => { setCreating(false); go(`/articles/${p.id}`) }} />}
+      {bulk && <BulkEdit ids={[...selected]} onClose={() => setBulk(false)} onDone={() => { setBulk(false); setSelected(new Set()); reload() }} />}
     </>
+  )
+}
+
+const KEEP = '__keep'
+
+/** Modification groupée : seuls les champs changés (« ne pas changer » sinon) sont envoyés à POST /admin/products/bulk. */
+function BulkEdit({ ids, onClose, onDone }: { ids: string[]; onClose: () => void; onDone: () => void }) {
+  const { me, notify } = useApp()
+  const categories = useLoad(() => api.get<Category[]>('/admin/categories'), 'categories')
+  const brands = useLoad(() => api.get<Category[]>('/admin/brands'), 'brands')
+  const [f, setF] = useState({ category_id: KEEP, brand_id: KEEP, tva_rate: KEEP, active: KEEP })
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const set: Record<string, unknown> = {}
+  if (f.category_id !== KEEP) set.category_id = f.category_id || null
+  if (f.brand_id !== KEEP) set.brand_id = f.brand_id || null
+  if (f.tva_rate !== KEEP) set.tva_rate = Number(f.tva_rate)
+  if (f.active !== KEEP) set.active = f.active === 'yes'
+  const field = (k: keyof typeof f) => ({ value: f[k], onChange: (e: { target: { value: string } }) => setF((x) => ({ ...x, [k]: e.target.value })) })
+
+  async function submit() {
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await api.post<{ updated: number }>('/admin/products/bulk', { ids, set })
+      notify(`${plural(res.updated, 'article')} modifié${res.updated > 1 ? 's' : ''}. Les caisses les recevront à leur prochaine synchronisation.`)
+      onDone()
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Modification impossible.')
+      setBusy(false)
+    }
+  }
+  return (
+    <Modal title={`Modifier ${plural(ids.length, 'article')}`} onClose={onClose} footer={<>
+      <Button onClick={onClose}>Annuler</Button>
+      <Button variant="primary" icon="check" busy={busy} disabled={Object.keys(set).length === 0} onClick={submit}>Appliquer</Button>
+    </>}>
+      <div className="form">
+        <Field label="Catégorie">
+          <select {...field('category_id')}><option value={KEEP}>Ne pas changer</option><option value="">Aucune</option>
+            {categories.data?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+        </Field>
+        <Field label="Marque">
+          <select {...field('brand_id')}><option value={KEEP}>Ne pas changer</option><option value="">Aucune</option>
+            {brands.data?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+        </Field>
+        <Field label="TVA">
+          <select {...field('tva_rate')}><option value={KEEP}>Ne pas changer</option>
+            {me.settings.tva_rates.map((r) => <option key={r} value={r}>{r} %</option>)}</select>
+        </Field>
+        <Field label="Statut" hint="Un article à 0 DH ne peut pas être activé : donnez-lui d’abord un prix.">
+          <select {...field('active')}><option value={KEEP}>Ne pas changer</option><option value="yes">Actif (proposé aux caisses)</option>
+            <option value="no">Inactif</option></select>
+        </Field>
+        {error && <p className="alert form-field wide"><Icon name="alert" />{error}</p>}
+      </div>
+    </Modal>
   )
 }
 

@@ -13,7 +13,7 @@ type Kind = 'receipt' | 'adjustment' | 'inventory'
 const KINDS: { kind: Kind; label: string; help: string }[] = [
   { kind: 'receipt', label: 'Réception', help: 'Marchandise reçue : la quantité s’ajoute au stock. Le prix d’achat saisi met à jour la fiche.' },
   { kind: 'adjustment', label: 'Ajustement', help: 'Casse, perte, consommation : quantité négative pour retirer, positive pour ajouter. Motif obligatoire.' },
-  { kind: 'inventory', label: 'Inventaire', help: 'Quantité comptée en rayon : le stock prend cette valeur.' },
+  { kind: 'inventory', label: 'Recompter un article', help: 'Quelques articles recomptés en rayon : le stock prend la valeur saisie. Pour un rayon entier ou tout le magasin, utilisez « Inventaires ».' },
 ]
 
 export function StockPage() {
@@ -30,6 +30,7 @@ export function StockPage() {
       <PageHeader title="Stock" subtitle="Entrées, sorties et inventaires, magasin par magasin." actions={<>
         {KINDS.map((k) => <Button key={k.kind} icon={k.kind === 'receipt' ? 'plus' : k.kind === 'inventory' ? 'check' : 'edit'}
           variant={k.kind === 'receipt' ? 'primary' : 'default'} onClick={() => setForm(k.kind)}>{k.label}</Button>)}
+        <a className="btn" href="#/inventaires"><Icon name="clipboard" />Inventaires</a>
       </>} />
       <PeriodPicker />
       <div className="chips">

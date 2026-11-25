@@ -22,6 +22,7 @@ function Kind({ path, title, withAr }: { path: 'categories' | 'brands'; title: s
   const { notify } = useApp()
   const { data, error, loading, reload } = useLoad(() => api.get<Category[]>(`/admin/${path}`), path)
   const [editing, setEditing] = useState<Category | 'new' | null>(null)
+  const [merging, setMerging] = useState<Category | null>(null)
 
   async function remove(c: Category) {
     try {
@@ -42,6 +43,7 @@ function Kind({ path, title, withAr }: { path: 'categories' | 'brands'; title: s
               <span className="grow">{c.name}{c.name_ar && <span className="muted" dir="rtl"> · {c.name_ar}</span>}
                 <span className="sub muted small"> · {plural(c.product_count, 'article')}</span></span>
               <Button small variant="ghost" icon="edit" title="Modifier" onClick={() => setEditing(c)} />
+              <Button small variant="ghost" icon="merge" title="Fusionner avec une autre (doublon)" disabled={data.length < 2} onClick={() => setMerging(c)} />
               <Button small variant="ghost" icon="trash" title={c.product_count ? 'Utilisée par des articles' : 'Supprimer'}
                 disabled={c.product_count > 0} onClick={() => remove(c)} />
             </li>
@@ -50,6 +52,8 @@ function Kind({ path, title, withAr }: { path: 'categories' | 'brands'; title: s
       )}
       {editing && <NameForm path={path} withAr={withAr} item={editing === 'new' ? null : editing} onClose={() => setEditing(null)}
         onSaved={() => { setEditing(null); reload() }} />}
+      {merging && data && <MergeForm path={path} item={merging} others={data.filter((x) => x.id !== merging.id)} onClose={() => setMerging(null)}
+        onDone={() => { setMerging(null); reload() }} />}
     </Panel>
   )
 }
@@ -85,6 +89,45 @@ function NameForm({ path, withAr, item, onClose, onSaved }: {
         {withAr && <Field label="Nom arabe (facultatif)" wide><input dir="rtl" value={nameAr} maxLength={80} onChange={(e) => setNameAr(e.target.value)} /></Field>}
         {error && <p className="alert form-field wide"><Icon name="alert" />{error}</p>}
       </form>
+    </Modal>
+  )
+}
+
+/** Fusion de doublons (« LRS EPICES » et « EPICES ») : les articles passent dans celle qu'on garde, l'autre est supprimée. */
+function MergeForm({ path, item, others, onClose, onDone }: {
+  path: 'categories' | 'brands'; item: Category; others: Category[]; onClose: () => void; onDone: () => void
+}) {
+  const { notify } = useApp()
+  const [into, setInto] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const target = others.find((o) => o.id === into)
+  async function submit() {
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await api.post<{ moved: number }>(`/admin/${path}/${item.id}/merge`, { into })
+      notify(`${item.name} fusionnée dans ${target?.name} : ${plural(res.moved, 'article')} déplacé${res.moved > 1 ? 's' : ''}.`)
+      onDone()
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Fusion impossible.')
+      setBusy(false)
+    }
+  }
+  return (
+    <Modal title={`Fusionner ${item.name}`} onClose={onClose} footer={<>
+      <Button onClick={onClose}>Annuler</Button>
+      <Button variant="primary" icon="merge" busy={busy} disabled={!into} onClick={submit}>Fusionner</Button>
+    </>}>
+      <div className="form">
+        <Field label="Garder" wide hint={`Les ${plural(item.product_count, 'article')} de « ${item.name} » y passeront, puis « ${item.name} » sera supprimée.`}>
+          <select autoFocus value={into} onChange={(e) => setInto(e.target.value)}>
+            <option value="">Choisir…</option>
+            {others.map((o) => <option key={o.id} value={o.id}>{o.name} ({plural(o.product_count, 'article')})</option>)}
+          </select>
+        </Field>
+        {error && <p className="alert form-field wide"><Icon name="alert" />{error}</p>}
+      </div>
     </Modal>
   )
 }

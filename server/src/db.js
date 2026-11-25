@@ -263,6 +263,32 @@ CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+-- Inventaire : une feuille de comptage par magasin, remplie au fil du comptage, appliquée au stock à la validation.
+CREATE TABLE IF NOT EXISTS inventories (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  name TEXT NOT NULL,
+  category_id TEXT,
+  status TEXT NOT NULL CHECK (status IN ('open', 'validated', 'cancelled')),
+  zero_uncounted INTEGER NOT NULL DEFAULT 0,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  closed_by TEXT,
+  closed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS inventories_store ON inventories(store_id, status);
+-- counted et expected en millièmes ; expected = stock au moment du comptage (les ventes faites ensuite sont gardées) ;
+-- delta = ce qui a été appliqué au stock à la validation.
+CREATE TABLE IF NOT EXISTS inventory_counts (
+  inventory_id TEXT NOT NULL REFERENCES inventories(id),
+  product_id TEXT NOT NULL REFERENCES products(id),
+  counted INTEGER NOT NULL CHECK (counted >= 0),
+  expected INTEGER NOT NULL,
+  delta INTEGER,
+  counted_by TEXT NOT NULL,
+  counted_at TEXT NOT NULL,
+  PRIMARY KEY (inventory_id, product_id)
+);
 `;
 
 /** Ouvre (ou crée) la base. ':memory:' pour les tests. */

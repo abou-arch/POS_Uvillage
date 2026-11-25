@@ -11,6 +11,7 @@ import { DEFAULT_TVA_RATES } from '../seed.js';
 import { clean, fail, fitsUnit, isDay, isId, isInt, isQuantity, isUuid, round3 } from '../validate.js';
 import { inList, newId, pageOf, periodOf, storesOf } from './common.js';
 import { customerFields, expectedByMethod, publicSession } from './pos.js';
+import { inventoryRoutes } from './inventories.js';
 import { overview, purchaseRoutes } from './purchases.js';
 
 const bool = (v) => v === true || v === 1;
@@ -131,6 +132,41 @@ export function adminRoutes(db, { pinIterations = PIN_ITERATIONS } = {}) {
     res.json(adminProduct(get(db, 'SELECT * FROM products WHERE id = ?', current.id), stock));
   });
 
+  // Modification groupée d'articles choisis dans la liste : catégorie, marque, TVA, actif. Tout ou rien.
+  r.post('/products/bulk', (req, res) => {
+    const b = req.body ?? {};
+    const ids = Array.isArray(b.ids) ? [...new Set(b.ids)] : [];
+    if (ids.length === 0 || ids.length > 5000 || !ids.every(isId)) fail(400, 'INVALID_DATA', 'Choisissez au moins un article');
+    const set = b.set ?? {};
+    const changes = [];
+    const ref = (v, table, label) => {
+      if (v === null || v === '') return null;
+      if (!isId(v) || !get(db, `SELECT id FROM ${table} WHERE id = ?`, v)) fail(422, 'UNKNOWN_REFERENCE', `${label} inconnue`);
+      return v;
+    };
+    if ('category_id' in set) changes.push(['category_id', ref(set.category_id, 'categories', 'Catégorie')]);
+    if ('brand_id' in set) changes.push(['brand_id', ref(set.brand_id, 'brands', 'Marque')]);
+    if ('tva_rate' in set) {
+      if (!tvaRates(db).includes(set.tva_rate)) fail(400, 'INVALID_TVA', 'Taux de TVA hors de la liste des réglages');
+      changes.push(['tva_rate', set.tva_rate]);
+    }
+    if ('active' in set) {
+      if (typeof set.active !== 'boolean') fail(400, 'INVALID_DATA', 'Statut invalide');
+      // Un article à 0 DH ne part pas aux caisses : on ne vend pas gratuitement par erreur.
+      if (set.active) {
+        const free = get(db, `SELECT COUNT(*) AS n FROM products WHERE price_ttc = 0 AND id IN (${inList(ids)})`, ...ids).n;
+        if (free > 0) fail(422, 'PRICE_REQUIRED', `${free} article(s) choisi(s) à 0 DH : donnez-leur un prix avant de les activer`);
+      }
+      changes.push(['active', set.active ? 1 : 0]);
+    }
+    if (changes.length === 0) fail(400, 'INVALID_DATA', 'Rien à modifier');
+    const found = get(db, `SELECT COUNT(*) AS n FROM products WHERE id IN (${inList(ids)})`, ...ids).n;
+    if (found !== ids.length) fail(404, 'NOT_FOUND', 'Article introuvable');
+    const updated = tx(db, () => run(db, `UPDATE products SET ${changes.map(([k]) => `${k} = ?`).join(', ')}, updated_at = ? WHERE id IN (${inList(ids)})`,
+      ...changes.map(([, v]) => v), stampNow(), ...ids).changes);
+    res.json({ updated });
+  });
+
   for (const [path, table, prefix, label] of [['categories', 'categories', 'cat', 'Catégorie'], ['brands', 'brands', 'br', 'Marque']]) {
     const withAr = table === 'categories';
     const fieldsOf = (b) => {
@@ -165,6 +201,22 @@ export function adminRoutes(db, { pinIterations = PIN_ITERATIONS } = {}) {
       }
       run(db, `DELETE FROM ${table} WHERE id = ?`, req.params.id);
       res.status(204).end();
+    });
+    // Fusion de deux doublons (« LRS EPICES » dans « LES EPICES ») : les articles passent dans `into`, l'autre disparaît.
+    r.post(`/${path}/:id/merge`, (req, res) => {
+      const column = table === 'categories' ? 'category_id' : 'brand_id';
+      const into = req.body?.into;
+      if (!get(db, `SELECT id FROM ${table} WHERE id = ?`, req.params.id)) fail(404, 'NOT_FOUND', `${label} introuvable`);
+      if (!isId(into) || into === req.params.id || !get(db, `SELECT id FROM ${table} WHERE id = ?`, into)) {
+        fail(422, 'UNKNOWN_REFERENCE', `${label} de destination invalide`);
+      }
+      const moved = tx(db, () => {
+        const n = run(db, `UPDATE products SET ${column} = ?, updated_at = ? WHERE ${column} = ?`, into, stampNow(), req.params.id).changes;
+        if (table === 'categories') run(db, 'UPDATE inventories SET category_id = ? WHERE category_id = ?', into, req.params.id);
+        run(db, `DELETE FROM ${table} WHERE id = ?`, req.params.id);
+        return n;
+      });
+      res.json({ moved, into: get(db, `SELECT * FROM ${table} WHERE id = ?`, into) });
     });
   }
 
@@ -393,6 +445,7 @@ export function adminRoutes(db, { pinIterations = PIN_ITERATIONS } = {}) {
   // --- Fournisseurs, factures d'achat, dépenses (routes/purchases.js) -------------------------------------------
 
   purchaseRoutes(r, db);
+  inventoryRoutes(r, db);
 
   // --- Utilisateurs (administrateur) ---------------------------------------------------------------------------
 

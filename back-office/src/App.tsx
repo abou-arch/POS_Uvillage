@@ -12,6 +12,7 @@ import { CustomerPage, CustomersPage } from './pages/CustomersPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { ExpensesPage } from './pages/ExpensesPage'
 import { ProductPage, ProductsPage } from './pages/ProductsPage'
+import { InventoriesPage, InventorySheetPage } from './pages/InventoryPage'
 import { PurchasePage, PurchasesPage } from './pages/PurchasesPage'
 import { RefundsPage } from './pages/RefundsPage'
 import { ReportsPage } from './pages/ReportsPage'
@@ -38,6 +39,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
     { path: 'articles', label: 'Articles', icon: 'tag' },
     { path: 'categories', label: 'Catégories et marques', icon: 'layers' },
     { path: 'stock', label: 'Stock', icon: 'box' },
+    { path: 'inventaires', label: 'Inventaires', icon: 'clipboard' },
   ] },
   { group: 'Achats', items: [
     { path: 'fournisseurs', label: 'Fournisseurs', icon: 'truck' },
@@ -179,6 +181,7 @@ function page([section = 'tableau-de-bord', id]: string[], isAdmin: boolean): Re
     case 'articles': return id ? <ProductPage id={id} /> : <ProductsPage />
     case 'categories': return <CategoriesPage />
     case 'stock': return <StockPage />
+    case 'inventaires': return id ? <InventorySheetPage id={id} /> : <InventoriesPage />
     case 'clients': return id ? <CustomerPage id={id} /> : <CustomersPage />
     case 'fournisseurs': return id ? <SupplierPage id={id} /> : <SuppliersPage />
     case 'achats': return id ? <PurchasePage id={id} /> : <PurchasesPage />
