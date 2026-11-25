@@ -5,12 +5,18 @@ Source unique des choix visuels du back-office. Toute couleur, taille, espacemen
 
 ## Thèses validées
 
-**Visuelle.** Interface claire, calme et dense pour l'outil de tous les jours d'une supérette : fond gris neutre très
-clair et surfaces blanches, encre presque noire, un seul accent bleu Majorelle (#3A3FC4, clin d'œil à Marrakech, qui
-tranche avec le bleu ordinaire de Falcon) ; Inter pour tout le texte, titres compris, chiffres tabulaires ; base de
-4 px, lignes de tableau de 36 px, beaucoup d'information par écran ; composants plats à filet de 1 px, coins de 8 px,
-aucune ombre sauf fenêtres et info-bulles ; les quatre familles de Falcon (achats, ventes dues, ventes, dépenses)
-gardent leur couleur, en pastille d'icône.
+**Visuelle.** Interface claire, calme et dense pour l'outil de tous les jours d'une supérette, dans l'esprit de la
+template Seren (style seulement, rien de son code ni de ses images) : fond gris-bleu froid, cartes blanches sans filet
+aux coins de 18 px posées sur une ombre douce et fixe, blocs gris clair à l'intérieur des cartes, boutons, filtres et
+compteurs en pilule, pastille verte ou rouge d'évolution sous les chiffres ; encre presque noire, un seul accent bleu
+Majorelle (#3A3FC4, clin d'œil à Marrakech) ; Inter pour tout le texte, titres compris, chiffres tabulaires ; base de
+4 px, lignes de tableau de 36 px, beaucoup d'information par écran ; les quatre familles de Falcon (achats, ventes
+dues, ventes, dépenses) gardent leur couleur, en pastille d'icône.
+
+**Fluidité et hors ligne.** La connexion de la supérette est mauvaise la plupart du temps et les PC de caisse sont
+modestes : rien ne se télécharge pour l'affichage (police livrée avec l'application, icônes en SVG dans le code, aucune
+image décorative) ; une seule ombre fixe par carte, jamais animée ; aucun flou d'arrière-plan (`backdrop-filter`) ni
+dégradé plein écran ; le voyant de connexion de la caisse reste toujours visible.
 
 Police : Inter seule, titres compris. Elle est déjà livrée avec l'application (`@fontsource-variable/inter`), donc
 aucune requête réseau dans un magasin à la connexion fragile, et ses chiffres tabulaires alignent les montants en
@@ -32,15 +38,16 @@ Curseurs : densité 8/10 (lignes de 36 px), mouvement 2/10 (rapide et sec, rien 
 
 | Jeton | Valeur | Rôle | Contraste |
 |---|---|---|---|
-| `--bg` | `#f3f4f6` | fond de page | encre 16,1:1 |
-| `--surface` | `#ffffff` | panneaux, tableaux, champs | encre 17,8:1 |
-| `--surface-2` | `#f8f9fa` | en-têtes de tableau, pieds de fenêtre | |
-| `--line` | `#e4e7eb` | filets (décor) | |
-| `--line-soft` | `#eef0f3` | filets entre lignes | |
+| `--bg` | `#eef1f5` | fond de page, gris-bleu | encre 16,4:1 |
+| `--surface` | `#ffffff` | cartes, tableaux, champs | encre 18,6:1 |
+| `--surface-2` | `#f4f6f9` | blocs dans les cartes, en-têtes de tableau, pieds de fenêtre | |
+| `--line` | `#e2e6ec` | filets (décor) | |
+| `--line-soft` | `#edf0f4` | filets entre lignes | |
 | `--field` | `#8a919e` | bord des champs et boutons secondaires | 3,2:1 sur blanc |
-| `--ink` | `#16181d` | texte principal | |
-| `--ink-2` | `#4b5260` | texte secondaire fort | 7,9:1 sur blanc |
-| `--muted` | `#626977` | libellés, métadonnées | 5,0:1 sur fond, 5,5:1 sur blanc |
+| `--ink` | `#111318` | texte principal | |
+| `--ink-2` | `#454d5c` | texte secondaire fort | 8,5:1 sur blanc |
+| `--muted` | `#5d6676` | libellés, métadonnées | 5,1:1 sur fond, 5,8:1 sur blanc |
+| `--slate` / `--slate-soft` | `#8390a6` / `#dfe4ec` | ardoise : décor seulement (jamais de texte courant) | |
 | `--faint` | `#9aa1ad` | décor seulement (jamais de texte) | |
 | `--accent` | `#3a3fc4` | Majorelle : liens, bouton principal, focus | 7,8:1 sur blanc |
 | `--accent-strong` | `#2e33a8` | survol du bouton principal | |
@@ -88,9 +95,11 @@ où il y a des montants.
 - Espacement, base 4 px : `--sp-1` 4, `--sp-2` 8, `--sp-3` 12, `--sp-4` 16, `--sp-5` 24, `--sp-6` 32.
 - Hauteurs : ligne de tableau `--row` 36 px, bouton et champ `--control` 34 px (`--control-sm` 32 px en petit), pastille
   d'icône `--chip` 40 px, barre du haut `--bar` 56 px, menu `--sidebar` 248 px.
-- Coins : `--r-sm` 6 px (boutons, champs, pastilles), `--r-md` 8 px (panneaux, tuiles, fenêtres), `--r-full`
-  999 px (badges).
-- Ombres : aucune sur les panneaux. `--shadow-pop` `0 16px 40px rgb(22 24 29 / .18)` pour fenêtres et info-bulles.
+- Coins : `--r-sm` 10 px (champs, lignes du menu), `--r-md` 12 px (blocs internes, messages), `--r-lg` 18 px (cartes,
+  tuiles, fenêtres), `--r-full` 999 px (boutons, filtres, badges, recherche).
+- Ombres : `--shadow-card` `0 1px 2px rgb(17 19 24 / .04), 0 8px 24px rgb(17 19 24 / .06)` sur les cartes, fixe, jamais
+  animée (le survol change le filet ou le fond). `--shadow-pop` `0 16px 40px rgb(17 19 24 / .18)` pour fenêtres et
+  info-bulles. À l'impression, l'ombre devient un filet.
 - Focus : `--ring` `0 0 0 3px rgb(58 63 196 / .25)` sur les champs, anneau de 2 px Majorelle décalé de 2 px ailleurs.
 - Voile derrière fenêtres et menu mobile : `--scrim` `rgb(22 24 29 / .4)`.
 - Plans : info-bulles 5, barre du haut 10, voile 15, menu mobile 20, notification 30 ; fenêtres en `<dialog>` natif
@@ -121,7 +130,8 @@ animation de `width`, `height`, `top`, `left`. Seuls `opacity` et `transform` s'
 - **Bouton discret** (icône) : transparent ; survol `--surface-2`.
 - **Bouton danger** : texte et bord `--bad` ; survol fond `--bad-soft`.
 - **Champ** : bord `--field`, coin `--r-sm` ; focus bord `--accent` + `--ring` ; invalide bord `--bad`.
-- **Panneau** : `--surface`, filet `--line`, coin `--r-md`, sans ombre.
+- **Carte** (panneau, tuile, chiffre) : `--surface`, sans filet, coin `--r-lg`, `--shadow-card`.
+- **Pastille d'évolution** : pilule sous un chiffre, `--ok-soft` / `--ok` en hausse, `--bad-soft` / `--bad` en baisse.
 - **Badge** : coin `--r-full`, fond doux de sa famille, texte de la couleur forte.
 - **Lien** : `--accent`, souligné au survol.
 - **Ligne de tableau** : 36 px, filet `--line-soft` ; survol `--accent-soft` ; cliquable = curseur main.
@@ -134,6 +144,7 @@ Mêmes jetons, mêmes règles, avec ce qu'impose un écran tactile tenu par une 
 - Vert foncé `--ok-strong` `#0f5c37` (survol du bouton « Espèces »), filets `--ok-line` `#b5dcc6`,
   `--warn-line` `#f0d49b`, rouge foncé `--bad-strong` `#912018`.
 - Le total à payer est un aplat `--accent`, texte `--on-accent` (7,8:1).
+- Les tuiles d'articles sont des blocs `--surface-2` dans la carte blanche ; au survol, fond blanc et filet `--accent`.
 - `--dur-flash` 600 ms : une ligne ajoutée au panier ou un montant qui change s'allume en `--accent-soft`, puis s'éteint.
 - Seule boucle tolérée : le voyant de synchro clignote pendant un envoi (une attente, comme un chargement).
 - Retirés : onde au toucher, article qui vole vers le total, total qui défile, confettis, halos de fond.
