@@ -33,6 +33,17 @@ npm start
 
 L'administrateur crée ensuite dans le back-office les magasins, caisses, utilisateurs, catégories et articles. `.env` et `data/` (la base) ne sont jamais commités.
 
+### Reprise des données de Falcon POS
+
+Une fois le magasin créé, les exports Excel de Falcon (liste des articles « tableExport », liste des fournisseurs) se reprennent en une commande :
+
+```bash
+npm run import:falcon -- tableExport.xlsx "Liste des fournisseurs.xlsx" --dry-run   # rapport seulement
+npm run import:falcon -- tableExport.xlsx "Liste des fournisseurs.xlsx"             # import (--update : Falcon remplace les articles de même code)
+```
+
+Règles (`src/importFalcon.js`) : nom et nom arabe séparés (« Pain normal (خبز عادي) »), TVA 0 %, un code en double dans Falcon devient `IT0681-2`, un article à 0 DH est repris inactif, un stock au-delà de 9 999 n'est pas repris (mis à 0, à compter à l'inventaire). Le reste dû à chaque fournisseur devient une facture d'ouverture. Relancer la commande n'ajoute rien de ce qui est déjà en base.
+
 ## Valeurs provisoires (à remplacer par celles du client)
 
 Les données de démonstration viennent des captures de Falcon POS (le POS actuel du client) : articles, prix, stocks, catégories. Sont **à confirmer** :

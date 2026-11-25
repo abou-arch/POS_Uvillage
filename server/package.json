@@ -12,7 +12,8 @@
     "dev": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env --watch src/index.js",
     "demo": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env src/index.js --demo",
     "seed": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env src/index.js --seed-only",
-    "test": "node --disable-warning=ExperimentalWarning --test"
+    "test": "node --disable-warning=ExperimentalWarning --test",
+    "import:falcon": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env scripts/import-falcon.js"
   },
   "dependencies": {
     "cors": "^2.8.6",
