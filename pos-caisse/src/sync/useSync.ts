@@ -17,6 +17,7 @@ export type Connection = 'online' | 'offline' | 'syncing';
 export type Outcome = { status: 'sent' } | { status: 'rejected'; error: string };
 
 const MAX_OUTCOMES = 50;
+const CATALOG_REFRESH_MS = 10_000;
 
 export function useSync(storeId: string) {
   const [connection, setConnection] = useState<Connection>(() => (navigator.onLine ? 'syncing' : 'offline'));
@@ -68,6 +69,24 @@ export function useSync(storeId: string) {
       loop.current = null;
       window.removeEventListener('online', onOnline);
       window.removeEventListener('offline', onOffline);
+    };
+  }, [storeId]);
+
+  // Le stock doit suivre sans rechargement : relecture toutes les 10 s quand tout va bien, et dès que la fenêtre
+  // redevient visible ou reprend le focus. Passe par la boucle (jamais deux passages à la fois, vente envoyée avant lecture).
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState === 'visible' && navigator.onLine) void loop.current?.trigger(false);
+    };
+    const timer = window.setInterval(() => {
+      if (loop.current?.failures === 0) refresh();
+    }, CATALOG_REFRESH_MS);
+    document.addEventListener('visibilitychange', refresh);
+    window.addEventListener('focus', refresh);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', refresh);
+      window.removeEventListener('focus', refresh);
     };
   }, [storeId]);
 

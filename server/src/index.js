@@ -7,6 +7,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createApp } from './app.js';
+import { startBreakline } from './breakline.js';
 import { openDb } from './db.js';
 import { passwordProblem } from './security.js';
 import { isEmpty, seedAdmin, seedDemo } from './seed.js';
@@ -37,6 +38,9 @@ if (isEmpty(db)) {
   }
 }
 if (args.has('--seed-only')) process.exit(0);
+
+// Connexion à BreakLine (facultative : sans BREAKLINE_URL, le POS fonctionne seul). Voir src/breakline.js.
+startBreakline(db);
 
 const corsOrigins = env.CORS_ORIGINS ? env.CORS_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean) : null;
 const app = createApp({ db, corsOrigins, tokenTtlHours: Number(env.TOKEN_TTL_HOURS) || undefined });

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch, type FormEvent } from 'react';
 import { categoryHue, categoryPictogram } from '../lib/categoryLook';
 import { lookupScan } from '../lib/scan';
+import { readScan, recordStroke, type Stroke } from '../lib/scanKeys';
 import { formatMad, lineTotals, saleTotals } from '../lib/totals.js';
 import { formatQuantity, lineUnit, unitPrice } from '../lib/units';
 import { articleCount, canSendSms, isSpecialCustomer, type CartAction, type CartState } from '../state/cart';
@@ -35,6 +36,7 @@ export function Cart({ cart, dispatch, products, categories, barcodeRules, onPic
   const [editingCharges, setEditingCharges] = useState(false);
   const special = isSpecialCustomer(cart.customer);
   const scanRef = useRef<HTMLInputElement>(null);
+  const strokes = useRef<Stroke[]>([]); // touches physiques du scan en cours (voir lib/scanKeys.ts)
   const [scanError, setScanError] = useState<string | null>(null);
   const [paying, setPaying] = useState<'cash' | 'qr' | 'multiple' | 'hold' | null>(null);
   const totals = saleTotals(cart.lines, cart.otherCharges, cart.globalDiscount);
@@ -79,7 +81,14 @@ export function Cart({ cart, dispatch, products, categories, barcodeRules, onPic
   // Une douchette tape le code puis « Entrée » : on traite donc la saisie comme un formulaire.
   function scan(e: FormEvent) {
     e.preventDefault();
-    const found = lookupScan(scanRef.current?.value ?? '', products, barcodeRules);
+    // Clavier AZERTY : on relit le code d'après les touches physiques, pas d'après les caractères du champ.
+    const isKnown = (t: string) => {
+      const r = lookupScan(t, products, barcodeRules);
+      return r !== null && r.kind !== 'error';
+    };
+    const text = readScan(strokes.current, scanRef.current?.value ?? '', isKnown);
+    strokes.current = [];
+    const found = lookupScan(text, products, barcodeRules);
     if (!found) return;
     if (found.kind === 'weighed') dispatch({ type: 'add', product: found.product, quantity: found.quantity });
     else if (found.kind === 'product') onPick(found.product);
@@ -94,6 +103,7 @@ export function Cart({ cart, dispatch, products, categories, barcodeRules, onPic
           <div className="field">
             <Icon name="barcode" />
             <input id="scan" ref={scanRef} autoFocus autoComplete="off" onInput={() => setScanError(null)}
+              onKeyDown={(e) => recordStroke(strokes.current, e.nativeEvent, performance.now())}
               placeholder="Scanner un code-barres, ou taper un code ou un nom" aria-label="Scanner ou rechercher un article" />
             <kbd>Ctrl+Maj+S</kbd>
           </div>

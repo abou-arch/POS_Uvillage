@@ -31,19 +31,26 @@ export function publicStore(db, s) {
   };
 }
 
+let stockHook = null;
+/** Fonction appelée dans la foulée de chaque mouvement de stock (même transaction) : sert à la connexion BreakLine. */
+export const setStockHook = (fn) => { stockHook = fn; };
+
 /**
  * Mouvement de stock : la quantité du magasin change de `delta` millièmes, le mouvement est tracé, et l'article est
  * marqué modifié (la caisse reçoit le nouveau stock à sa prochaine synchro, `updated_since`). Renvoie le nouveau stock.
+ * `external` : le mouvement vient d'une synchro (BreakLine), il ne doit pas être renvoyé à son origine.
  */
-export function moveStock(db, { productId, storeId, delta, kind, refId = null, note = null, userId = null, at = nowIso() }) {
+export function moveStock(db, { productId, storeId, delta, kind, refId = null, note = null, userId = null, at = nowIso(), external = false }) {
   if (delta === 0) return null;
   const product = get(db, 'SELECT id FROM products WHERE id = ?', productId);
   if (!product) return null; // article inconnu (supprimé depuis une vente hors ligne) : rien à bouger
+  const moveId = randomUUID();
   run(db, `INSERT INTO stock (product_id, store_id, quantity) VALUES (?, ?, ?)
     ON CONFLICT(product_id, store_id) DO UPDATE SET quantity = quantity + excluded.quantity`, productId, storeId, delta);
   run(db, `INSERT INTO stock_moves (id, product_id, store_id, delta, kind, ref_id, note, user_id, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, randomUUID(), productId, storeId, delta, kind, refId, note, userId, at);
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, moveId, productId, storeId, delta, kind, refId, note, userId, at);
   run(db, 'UPDATE products SET updated_at = ? WHERE id = ?', stampNow(), productId);
+  if (!external) stockHook?.(db, { moveId, productId, storeId, delta, kind });
   return get(db, 'SELECT quantity FROM stock WHERE product_id = ? AND store_id = ?', productId, storeId).quantity;
 }
 
